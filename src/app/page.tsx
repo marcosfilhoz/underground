@@ -143,6 +143,8 @@ type ApiEnvelope<T> = {
   error?: string;
 };
 
+const sessionStorageKey = "sys-underground-user";
+
 async function apiRequest<T>(url: string, options?: RequestInit) {
   const response = await fetch(url, {
     headers: {
@@ -161,7 +163,11 @@ async function apiRequest<T>(url: string, options?: RequestInit) {
 }
 
 export default function Home() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      Boolean(window.localStorage.getItem(sessionStorageKey)),
+  );
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionName>("Home");
   const [loginForm, setLoginForm] = useState({ password: "", username: "" });
@@ -298,10 +304,11 @@ export default function Home() {
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
-      await apiRequest<UserRecord>("/api/auth/login", {
+      const user = await apiRequest<UserRecord>("/api/auth/login", {
         body: JSON.stringify(loginForm),
         method: "POST",
       });
+      window.localStorage.setItem(sessionStorageKey, JSON.stringify(user));
       setIsLoggedIn(true);
       setIsMenuOpen(false);
       setLoginError("");
@@ -2312,6 +2319,7 @@ export default function Home() {
               <button
                 className="hidden rounded-2xl px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 sm:block"
                 onClick={() => {
+                  window.localStorage.removeItem(sessionStorageKey);
                   setIsLoggedIn(false);
                   setActiveSection("Home");
                 }}
