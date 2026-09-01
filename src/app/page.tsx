@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { ChangeEvent, FormEvent, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 
 type SectionName =
   | "Home"
@@ -138,6 +138,28 @@ const emptyProductionExpense = {
   value: "",
 };
 
+type ApiEnvelope<T> = {
+  data?: T;
+  error?: string;
+};
+
+async function apiRequest<T>(url: string, options?: RequestInit) {
+  const response = await fetch(url, {
+    headers: {
+      "Content-Type": "application/json",
+      ...(options?.headers ?? {}),
+    },
+    ...options,
+  });
+  const payload = (await response.json()) as ApiEnvelope<T>;
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "Request failed.");
+  }
+
+  return payload.data as T;
+}
+
 export default function Home() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -237,22 +259,55 @@ export default function Home() {
     "TOP Customers",
   ];
 
-  function handleLogin(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const validUser = users.find(
-      (user) =>
-        user.username === loginForm.username &&
-        user.password === loginForm.password,
-    );
-
-    if (!validUser) {
-      setLoginError("Invalid username or password.");
+  useEffect(() => {
+    if (!isLoggedIn) {
       return;
     }
 
-    setIsLoggedIn(true);
-    setIsMenuOpen(false);
-    setLoginError("");
+    async function loadData() {
+      const [
+        companyData,
+        customerData,
+        employeeData,
+        userData,
+        inventoryData,
+        expenseTypeData,
+        productionData,
+      ] = await Promise.all([
+        apiRequest<Company[]>("/api/companies"),
+        apiRequest<Customer[]>("/api/customers"),
+        apiRequest<Employee[]>("/api/employees"),
+        apiRequest<UserRecord[]>("/api/users"),
+        apiRequest<InventoryItem[]>("/api/inventory"),
+        apiRequest<ExpenseType[]>("/api/expense-types"),
+        apiRequest<ProductionRecord[]>("/api/production"),
+      ]);
+
+      setCompanies(companyData);
+      setCustomers(customerData);
+      setEmployees(employeeData);
+      setUsers(userData);
+      setInventoryItems(inventoryData);
+      setExpenseTypes(expenseTypeData);
+      setProductionRecords(productionData);
+    }
+
+    loadData().catch((error) => setLoginError(error.message));
+  }, [isLoggedIn]);
+
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      await apiRequest<UserRecord>("/api/auth/login", {
+        body: JSON.stringify(loginForm),
+        method: "POST",
+      });
+      setIsLoggedIn(true);
+      setIsMenuOpen(false);
+      setLoginError("");
+    } catch (error) {
+      setLoginError((error as Error).message);
+    }
   }
 
   function handleSectionChange(section: SectionName) {
@@ -313,23 +368,26 @@ export default function Home() {
     printWindow.print();
   }
 
-  function saveCompany(event: FormEvent<HTMLFormElement>) {
+  async function saveCompany(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (editingCompanyId) {
+      const savedCompany = await apiRequest<Company>("/api/companies", {
+        body: JSON.stringify({ id: editingCompanyId, ...companyForm }),
+        method: "PUT",
+      });
       setCompanies((current) =>
         current.map((company) =>
-          company.id === editingCompanyId
-            ? { id: editingCompanyId, ...companyForm }
-            : company,
+          company.id === editingCompanyId ? savedCompany : company,
         ),
       );
       setEditingCompanyId(null);
     } else {
-      setCompanies((current) => [
-        ...current,
-        { id: Date.now(), ...companyForm },
-      ]);
+      const savedCompany = await apiRequest<Company>("/api/companies", {
+        body: JSON.stringify(companyForm),
+        method: "POST",
+      });
+      setCompanies((current) => [...current, savedCompany]);
     }
 
     setCompanyForm(emptyCompany);
@@ -348,7 +406,8 @@ export default function Home() {
     setIsCompanyModalOpen(true);
   }
 
-  function deleteCompany(id: number) {
+  async function deleteCompany(id: number) {
+    await apiRequest(`/api/companies?id=${id}`, { method: "DELETE" });
     setCompanies((current) => current.filter((company) => company.id !== id));
 
     if (editingCompanyId === id) {
@@ -358,23 +417,26 @@ export default function Home() {
     }
   }
 
-  function saveCustomer(event: FormEvent<HTMLFormElement>) {
+  async function saveCustomer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (editingCustomerId) {
+      const savedCustomer = await apiRequest<Customer>("/api/customers", {
+        body: JSON.stringify({ id: editingCustomerId, ...customerForm }),
+        method: "PUT",
+      });
       setCustomers((current) =>
         current.map((customer) =>
-          customer.id === editingCustomerId
-            ? { id: editingCustomerId, ...customerForm }
-            : customer,
+          customer.id === editingCustomerId ? savedCustomer : customer,
         ),
       );
       setEditingCustomerId(null);
     } else {
-      setCustomers((current) => [
-        ...current,
-        { id: Date.now(), ...customerForm },
-      ]);
+      const savedCustomer = await apiRequest<Customer>("/api/customers", {
+        body: JSON.stringify(customerForm),
+        method: "POST",
+      });
+      setCustomers((current) => [...current, savedCustomer]);
     }
 
     setCustomerForm(emptyCustomer);
@@ -392,7 +454,8 @@ export default function Home() {
     setIsCustomerModalOpen(true);
   }
 
-  function deleteCustomer(id: number) {
+  async function deleteCustomer(id: number) {
+    await apiRequest(`/api/customers?id=${id}`, { method: "DELETE" });
     setCustomers((current) => current.filter((customer) => customer.id !== id));
 
     if (editingCustomerId === id) {
@@ -402,23 +465,26 @@ export default function Home() {
     }
   }
 
-  function saveEmployee(event: FormEvent<HTMLFormElement>) {
+  async function saveEmployee(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (editingEmployeeId) {
+      const savedEmployee = await apiRequest<Employee>("/api/employees", {
+        body: JSON.stringify({ id: editingEmployeeId, ...employeeForm }),
+        method: "PUT",
+      });
       setEmployees((current) =>
         current.map((employee) =>
-          employee.id === editingEmployeeId
-            ? { id: editingEmployeeId, ...employeeForm }
-            : employee,
+          employee.id === editingEmployeeId ? savedEmployee : employee,
         ),
       );
       setEditingEmployeeId(null);
     } else {
-      setEmployees((current) => [
-        ...current,
-        { id: Date.now(), ...employeeForm },
-      ]);
+      const savedEmployee = await apiRequest<Employee>("/api/employees", {
+        body: JSON.stringify(employeeForm),
+        method: "POST",
+      });
+      setEmployees((current) => [...current, savedEmployee]);
     }
 
     setEmployeeForm(emptyEmployee);
@@ -434,7 +500,8 @@ export default function Home() {
     setIsEmployeeModalOpen(true);
   }
 
-  function deleteEmployee(id: number) {
+  async function deleteEmployee(id: number) {
+    await apiRequest(`/api/employees?id=${id}`, { method: "DELETE" });
     setEmployees((current) => current.filter((employee) => employee.id !== id));
 
     if (editingEmployeeId === id) {
@@ -444,18 +511,26 @@ export default function Home() {
     }
   }
 
-  function saveUser(event: FormEvent<HTMLFormElement>) {
+  async function saveUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (editingUserId) {
+      const savedUser = await apiRequest<UserRecord>("/api/users", {
+        body: JSON.stringify({ id: editingUserId, ...userForm }),
+        method: "PUT",
+      });
       setUsers((current) =>
         current.map((user) =>
-          user.id === editingUserId ? { id: editingUserId, ...userForm } : user,
+          user.id === editingUserId ? savedUser : user,
         ),
       );
       setEditingUserId(null);
     } else {
-      setUsers((current) => [...current, { id: Date.now(), ...userForm }]);
+      const savedUser = await apiRequest<UserRecord>("/api/users", {
+        body: JSON.stringify(userForm),
+        method: "POST",
+      });
+      setUsers((current) => [...current, savedUser]);
     }
 
     setUserForm(emptyUser);
@@ -472,11 +547,12 @@ export default function Home() {
     setIsUserModalOpen(true);
   }
 
-  function deleteUser(id: number) {
+  async function deleteUser(id: number) {
     if (users.length === 1) {
       return;
     }
 
+    await apiRequest(`/api/users?id=${id}`, { method: "DELETE" });
     setUsers((current) => current.filter((user) => user.id !== id));
 
     if (editingUserId === id) {
@@ -492,23 +568,26 @@ export default function Home() {
       : Math.max(...inventoryItems.map((item) => item.id)) + 1;
   }
 
-  function saveInventoryItem(event: FormEvent<HTMLFormElement>) {
+  async function saveInventoryItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (editingInventoryId) {
+      const savedItem = await apiRequest<InventoryItem>("/api/inventory", {
+        body: JSON.stringify({ id: editingInventoryId, ...inventoryForm }),
+        method: "PUT",
+      });
       setInventoryItems((current) =>
         current.map((item) =>
-          item.id === editingInventoryId
-            ? { id: editingInventoryId, ...inventoryForm }
-            : item,
+          item.id === editingInventoryId ? savedItem : item,
         ),
       );
       setEditingInventoryId(null);
     } else {
-      setInventoryItems((current) => [
-        ...current,
-        { id: getNextInventoryId(), ...inventoryForm },
-      ]);
+      const savedItem = await apiRequest<InventoryItem>("/api/inventory", {
+        body: JSON.stringify(inventoryForm),
+        method: "POST",
+      });
+      setInventoryItems((current) => [...current, savedItem]);
     }
 
     setInventoryForm(emptyInventoryItem);
@@ -527,7 +606,8 @@ export default function Home() {
     setIsInventoryModalOpen(true);
   }
 
-  function deleteInventoryItem(id: number) {
+  async function deleteInventoryItem(id: number) {
+    await apiRequest(`/api/inventory?id=${id}`, { method: "DELETE" });
     setInventoryItems((current) => current.filter((item) => item.id !== id));
 
     if (editingInventoryId === id) {
@@ -543,23 +623,34 @@ export default function Home() {
       : Math.max(...productionRecords.map((record) => record.number)) + 1;
   }
 
-  function saveExpenseType(event: FormEvent<HTMLFormElement>) {
+  async function saveExpenseType(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (editingExpenseTypeId) {
+      const savedExpenseType = await apiRequest<ExpenseType>(
+        "/api/expense-types",
+        {
+          body: JSON.stringify({ id: editingExpenseTypeId, ...expenseTypeForm }),
+          method: "PUT",
+        },
+      );
       setExpenseTypes((current) =>
         current.map((expenseType) =>
           expenseType.id === editingExpenseTypeId
-            ? { id: editingExpenseTypeId, ...expenseTypeForm }
+            ? savedExpenseType
             : expenseType,
         ),
       );
       setEditingExpenseTypeId(null);
     } else {
-      setExpenseTypes((current) => [
-        ...current,
-        { id: Date.now(), ...expenseTypeForm },
-      ]);
+      const savedExpenseType = await apiRequest<ExpenseType>(
+        "/api/expense-types",
+        {
+          body: JSON.stringify(expenseTypeForm),
+          method: "POST",
+        },
+      );
+      setExpenseTypes((current) => [...current, savedExpenseType]);
     }
 
     setExpenseTypeForm(emptyExpenseType);
@@ -572,7 +663,8 @@ export default function Home() {
     setIsExpenseTypeModalOpen(true);
   }
 
-  function deleteExpenseType(id: number) {
+  async function deleteExpenseType(id: number) {
+    await apiRequest(`/api/expense-types?id=${id}`, { method: "DELETE" });
     setExpenseTypes((current) =>
       current.filter((expenseType) => expenseType.id !== id),
     );
@@ -584,7 +676,7 @@ export default function Home() {
     }
   }
 
-  function saveProduction(event: FormEvent<HTMLFormElement>) {
+  async function saveProduction(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const expenses = productionExpenses.filter(
@@ -592,29 +684,32 @@ export default function Home() {
     );
 
     if (editingProductionId) {
+      const savedProduction = await apiRequest<ProductionRecord>(
+        "/api/production",
+        {
+          body: JSON.stringify({
+            id: editingProductionId,
+            ...productionForm,
+            expenses,
+          }),
+          method: "PUT",
+        },
+      );
       setProductionRecords((current) =>
         current.map((record) =>
-          record.id === editingProductionId
-            ? {
-                id: editingProductionId,
-                number: record.number,
-                ...productionForm,
-                expenses,
-              }
-            : record,
+          record.id === editingProductionId ? savedProduction : record,
         ),
       );
       setEditingProductionId(null);
     } else {
-      setProductionRecords((current) => [
-        ...current,
+      const savedProduction = await apiRequest<ProductionRecord>(
+        "/api/production",
         {
-          id: Date.now(),
-          number: getNextProductionNumber(),
-          ...productionForm,
-          expenses,
+          body: JSON.stringify({ ...productionForm, expenses }),
+          method: "POST",
         },
-      ]);
+      );
+      setProductionRecords((current) => [...current, savedProduction]);
     }
 
     setProductionForm(emptyProduction);
@@ -645,7 +740,8 @@ export default function Home() {
     setIsProductionModalOpen(true);
   }
 
-  function deleteProduction(id: number) {
+  async function deleteProduction(id: number) {
+    await apiRequest(`/api/production?id=${id}`, { method: "DELETE" });
     setProductionRecords((current) =>
       current.filter((record) => record.id !== id),
     );
