@@ -6,19 +6,25 @@ export async function POST(request: Request) {
     password?: string;
     username?: string;
   };
+  const username = body.username?.trim();
+  const password = body.password?.trim();
 
-  if (!body.username || !body.password) {
+  if (!username || !password) {
     return apiError("Username and password are required.");
   }
 
   const { data, error } = await supabaseAdmin
     .from("app_users")
     .select("id, name, username")
-    .eq("username", body.username)
-    .eq("password", body.password)
-    .single();
+    .eq("username", username)
+    .eq("password", password)
+    .maybeSingle();
 
-  if (error || !data) {
+  if (error) {
+    return apiError(error.message, 500);
+  }
+
+  if (!data) {
     return apiError("Invalid username or password.", 401);
   }
 
