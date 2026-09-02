@@ -2605,7 +2605,7 @@ function DateField({
           onBlur={(event) => onChange(formatDateForDisplay(event.target.value))}
           onChange={(event) => onChange(event.target.value)}
           onClick={openDatePicker}
-          pattern="\\d{1,2}/\\d{1,2}/\\d{4}"
+          pattern="[0-9]{1,2}/[0-9]{1,2}/[0-9]{4}"
           placeholder={placeholder}
           required={required}
           type="text"
