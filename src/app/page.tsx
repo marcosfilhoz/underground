@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { ChangeEvent, FormEvent, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 
 type SectionName =
   | "Home"
@@ -160,6 +160,65 @@ async function apiRequest<T>(url: string, options?: RequestInit) {
   }
 
   return payload.data as T;
+}
+
+function parseDateValue(value: string) {
+  if (!value) {
+    return null;
+  }
+
+  const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const usMatch = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const [, yearValue, monthValue, dayValue] = isoMatch ?? [];
+  const [, usMonthValue, usDayValue, usYearValue] = usMatch ?? [];
+
+  const year = Number(yearValue ?? usYearValue);
+  const month = Number(monthValue ?? usMonthValue);
+  const day = Number(dayValue ?? usDayValue);
+
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  const parsedDate = new Date(year, month - 1, day);
+
+  if (
+    parsedDate.getFullYear() !== year ||
+    parsedDate.getMonth() !== month - 1 ||
+    parsedDate.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return parsedDate;
+}
+
+function formatDateForDisplay(value: string) {
+  const parsedDate = parseDateValue(value);
+
+  if (!parsedDate) {
+    return value;
+  }
+
+  const month = String(parsedDate.getMonth() + 1).padStart(2, "0");
+  const day = String(parsedDate.getDate()).padStart(2, "0");
+  const year = parsedDate.getFullYear();
+
+  return `${month}/${day}/${year}`;
+}
+
+function toDatePickerValue(value: string) {
+  const parsedDate = parseDateValue(value);
+
+  if (!parsedDate) {
+    return "";
+  }
+
+  const month = String(parsedDate.getMonth() + 1).padStart(2, "0");
+  const day = String(parsedDate.getDate()).padStart(2, "0");
+  const year = parsedDate.getFullYear();
+
+  return `${year}-${month}-${day}`;
 }
 
 export default function Home() {
@@ -819,31 +878,11 @@ export default function Home() {
       return "Not informed";
     }
 
-    const parsedDate = parseUsDate(value);
-
-    if (!parsedDate) {
-      return value;
-    }
-
-    return new Intl.DateTimeFormat("en-US").format(parsedDate);
+    return formatDateForDisplay(value);
   }
 
   function parseUsDate(value: string) {
-    if (!value) {
-      return null;
-    }
-
-    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-      return new Date(`${value}T00:00:00`);
-    }
-
-    const [month, day, year] = value.split("/").map(Number);
-
-    if (!month || !day || !year) {
-      return null;
-    }
-
-    return new Date(year, month - 1, day);
+    return parseDateValue(value);
   }
 
   function calculateProduction(record: ProductionRecord) {
@@ -1392,6 +1431,7 @@ export default function Home() {
                     setProductionForm((current) => ({ ...current, date: value }))
                   }
                   placeholder="MM/DD/YYYY"
+                  type="date"
                   value={productionForm.date}
                 />
                 <SelectField
@@ -2492,6 +2532,17 @@ function TextField({
 }) {
   const id = label.toLowerCase().replaceAll(" ", "-");
 
+  if (type === "date") {
+    return (
+      <DateField
+        label={label}
+        onChange={onChange}
+        placeholder={placeholder}
+        value={value}
+      />
+    );
+  }
+
   return (
     <div>
       <label className="text-sm font-semibold text-slate-700" htmlFor={id}>
@@ -2507,6 +2558,69 @@ function TextField({
         type={type}
         value={value}
       />
+    </div>
+  );
+}
+
+function DateField({
+  label,
+  onChange,
+  placeholder = "MM/DD/YYYY",
+  required = true,
+  value,
+}: {
+  label: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  required?: boolean;
+  value: string;
+}) {
+  const id = label.toLowerCase().replaceAll(" ", "-");
+  const dateInputRef = useRef<HTMLInputElement>(null);
+
+  function openDatePicker() {
+    const input = dateInputRef.current;
+
+    if (!input) {
+      return;
+    }
+
+    try {
+      input.showPicker();
+    } catch {
+      input.click();
+    }
+  }
+
+  return (
+    <div>
+      <label className="text-sm font-semibold text-slate-700" htmlFor={id}>
+        {label}
+      </label>
+      <div className="relative mt-2">
+        <input
+          className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-950 outline-none transition focus:border-slate-950 focus:bg-white focus:ring-4 focus:ring-slate-100"
+          id={id}
+          inputMode="numeric"
+          onBlur={(event) => onChange(formatDateForDisplay(event.target.value))}
+          onChange={(event) => onChange(event.target.value)}
+          onClick={openDatePicker}
+          pattern="\\d{1,2}/\\d{1,2}/\\d{4}"
+          placeholder={placeholder}
+          required={required}
+          type="text"
+          value={value}
+        />
+        <input
+          aria-hidden
+          className="pointer-events-none absolute inset-0 h-full w-full opacity-0"
+          onChange={(event) => onChange(formatDateForDisplay(event.target.value))}
+          ref={dateInputRef}
+          tabIndex={-1}
+          type="date"
+          value={toDatePickerValue(value)}
+        />
+      </div>
     </div>
   );
 }
@@ -2690,6 +2804,18 @@ function FilterField({
   type?: "date" | "search";
   value: string;
 }) {
+  if (type === "date") {
+    return (
+      <DateField
+        label={label}
+        onChange={onChange}
+        placeholder={placeholder}
+        required={false}
+        value={value}
+      />
+    );
+  }
+
   return (
     <div>
       <label className="text-sm font-semibold text-slate-700" htmlFor={label}>
