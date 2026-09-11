@@ -36,6 +36,10 @@ type Employee = {
   id: number;
   name: string;
   phone: string;
+  ssn?: string | null;
+  itn?: string | null;
+  ssn_photo?: string | null;
+  itn_photo?: string | null;
 };
 
 type UserRecord = {
@@ -99,6 +103,10 @@ const emptyCustomer = {
 const emptyEmployee = {
   name: "",
   phone: "",
+  ssn: "",
+  itn: "",
+  ssn_photo: "",
+  itn_photo: "",
 };
 
 const emptyUser = {
@@ -290,6 +298,8 @@ export default function Home() {
   const [dashboardGroupFilter, setDashboardGroupFilter] = useState("");
   const [dashboardExpenseTypeFilter, setDashboardExpenseTypeFilter] =
     useState("");
+  const [areDashboardValuesVisible, setAreDashboardValuesVisible] =
+    useState(false);
   const [productionDetail, setProductionDetail] =
     useState<ProductionRecord | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -313,6 +323,7 @@ export default function Home() {
   const dashboardOptions = [
     "Summary",
     "Production Report",
+    "Production by FT",
     "Inventory Report",
     "Customers Report",
     "Companies Report",
@@ -380,6 +391,10 @@ export default function Home() {
     setActiveSection(section);
     setIsMenuOpen(false);
     setIsDashboardMenuOpen(false);
+
+    if (section !== "Dashboards") {
+      setAreDashboardValuesVisible(false);
+    }
   }
 
   function exportDashboardToPdf() {
@@ -561,6 +576,10 @@ export default function Home() {
     setEmployeeForm({
       name: employee.name,
       phone: employee.phone,
+      ssn: employee.ssn ?? "",
+      itn: employee.itn ?? "",
+      ssn_photo: employee.ssn_photo ?? "",
+      itn_photo: employee.itn_photo ?? "",
     });
     setEditingEmployeeId(employee.id);
     setIsEmployeeModalOpen(true);
@@ -873,6 +892,20 @@ export default function Home() {
     }).format(value);
   }
 
+  function formatQuantity(value: number) {
+    return new Intl.NumberFormat("en-US", {
+      maximumFractionDigits: 2,
+    }).format(value);
+  }
+
+  function dashboardMoney(value: number) {
+    return areDashboardValuesVisible ? formatMoney(value) : "$••••••";
+  }
+
+  function dashboardQuantity(value: number) {
+    return areDashboardValuesVisible ? formatQuantity(value) : "••••";
+  }
+
   function formatDate(value: string) {
     if (!value) {
       return "Not informed";
@@ -887,11 +920,15 @@ export default function Home() {
 
   function calculateProduction(record: ProductionRecord) {
     const ftQuantity = toNumber(record.ft);
-    const hhQuantity = toNumber(record.hh17x30) + toNumber(record.hh24x36);
+    const hh17x30 = toNumber(record.hh17x30);
+    const hh24x36 = toNumber(record.hh24x36);
+    const hhQuantity = hh17x30 + hh24x36;
+    const costFtUnit = toNumber(record.costFt);
+    const costHhUnit = toNumber(record.costHh);
     const ftValue = ftQuantity * toNumber(record.valueFt);
-    const ftCost = ftQuantity * toNumber(record.costFt);
+    const ftCost = ftQuantity * costFtUnit;
     const hhValue = hhQuantity * toNumber(record.valueHh);
-    const hhCost = hhQuantity * toNumber(record.costHh);
+    const hhCost = hhQuantity * costHhUnit;
     const expenseTotal = record.expenses.reduce(
       (total, expense) => total + toNumber(expense.value),
       0,
@@ -901,10 +938,14 @@ export default function Home() {
     const netValue = totalValue - totalCost - expenseTotal;
 
     return {
+      costFtUnit,
+      costHhUnit,
       expenseTotal,
       ftCost,
       ftQuantity,
       ftValue,
+      hh17x30,
+      hh24x36,
       hhCost,
       hhQuantity,
       hhValue,
@@ -936,12 +977,83 @@ export default function Home() {
 
           return {
             expenseTotal: totals.expenseTotal + current.expenseTotal,
+            ftCost: totals.ftCost + current.ftCost,
+            ftQuantity: totals.ftQuantity + current.ftQuantity,
+            ftValue: totals.ftValue + current.ftValue,
+            hh17x30: totals.hh17x30 + current.hh17x30,
+            hh24x36: totals.hh24x36 + current.hh24x36,
+            hhCost: totals.hhCost + current.hhCost,
+            hhQuantity: totals.hhQuantity + current.hhQuantity,
             netValue: totals.netValue + current.netValue,
+            totalCost: totals.totalCost + current.totalCost,
             totalValue: totals.totalValue + current.totalValue,
           };
         },
-        { expenseTotal: 0, netValue: 0, totalValue: 0 },
+        {
+          expenseTotal: 0,
+          ftCost: 0,
+          ftQuantity: 0,
+          ftValue: 0,
+          hh17x30: 0,
+          hh24x36: 0,
+          hhCost: 0,
+          hhQuantity: 0,
+          netValue: 0,
+          totalCost: 0,
+          totalValue: 0,
+        },
       );
+      const productionByDay = [...dashboardProductionRecords]
+        .sort((left, right) => {
+          const dateDiff =
+            (parseUsDate(left.date)?.getTime() ?? 0) -
+            (parseUsDate(right.date)?.getTime() ?? 0);
+
+          return dateDiff !== 0 ? dateDiff : left.number - right.number;
+        })
+        .reduce<
+          Array<{
+            date: string;
+            ftCost: number;
+            ftQuantity: number;
+            hhCost: number;
+            hhQuantity: number;
+            records: Array<{
+              record: ProductionRecord;
+              totals: ReturnType<typeof calculateProduction>;
+            }>;
+          }>
+        >((days, record) => {
+          const totals = calculateProduction(record);
+          const lastDay = days[days.length - 1];
+
+          if (lastDay && lastDay.date === record.date) {
+            lastDay.records.push({ record, totals });
+            lastDay.ftCost += totals.ftCost;
+            lastDay.ftQuantity += totals.ftQuantity;
+            lastDay.hhCost += totals.hhCost;
+            lastDay.hhQuantity += totals.hhQuantity;
+            return days;
+          }
+
+          days.push({
+            date: record.date,
+            ftCost: totals.ftCost,
+            ftQuantity: totals.ftQuantity,
+            hhCost: totals.hhCost,
+            hhQuantity: totals.hhQuantity,
+            records: [{ record, totals }],
+          });
+
+          return days;
+        }, []);
+      const productionCompanyNames = [
+        ...new Set(
+          dashboardProductionRecords.map((record) =>
+            getCompanyName(record.companyId),
+          ),
+        ),
+      ].filter(Boolean);
       const dashboardExpenseEntries = dashboardProductionRecords.flatMap(
         (record) =>
           record.expenses.map((expense) => ({
@@ -994,24 +1106,24 @@ export default function Home() {
         ],
         "Expense Report": [
           { label: "Expense Types", value: String(expenseTypes.length) },
-          { label: "Expense Total", value: formatMoney(filteredExpenseTotal) },
+          { label: "Expense Total", value: dashboardMoney(filteredExpenseTotal) },
           { label: "Production Records", value: String(dashboardProductionRecords.length) },
         ],
         "Expense Totals": [
-          { label: "Expense Total", value: formatMoney(filteredExpenseTotal) },
+          { label: "Expense Total", value: dashboardMoney(filteredExpenseTotal) },
           { label: "Expense Entries", value: String(filteredDashboardExpenses.length) },
           { label: "Expense Types", value: String(expenseTotalsByType.length) },
         ],
         "Financial Analysis": [
-          { label: "Total Value", value: formatMoney(productionTotals.totalValue) },
-          { label: "Expenses", value: formatMoney(productionTotals.expenseTotal) },
-          { label: "Net Value", value: formatMoney(productionTotals.netValue) },
+          { label: "Total Value", value: dashboardMoney(productionTotals.totalValue) },
+          { label: "Expenses", value: dashboardMoney(productionTotals.expenseTotal) },
+          { label: "Net Value", value: dashboardMoney(productionTotals.netValue) },
         ],
         "Inventory Report": [
           { label: "Inventory Items", value: String(inventoryItems.length) },
           {
             label: "Inventory Value",
-            value: formatMoney(
+            value: dashboardMoney(
               inventoryItems.reduce((total, item) => total + toNumber(item.value), 0),
             ),
           },
@@ -1019,13 +1131,19 @@ export default function Home() {
         ],
         "Production Report": [
           { label: "Production Records", value: String(dashboardProductionRecords.length) },
-          { label: "Total Value", value: formatMoney(productionTotals.totalValue) },
-          { label: "Net Value", value: formatMoney(productionTotals.netValue) },
+          { label: "Total Value", value: dashboardMoney(productionTotals.totalValue) },
+          { label: "Net Value", value: dashboardMoney(productionTotals.netValue) },
+        ],
+        "Production by FT": [
+          { label: "Total FT", value: dashboardQuantity(productionTotals.ftQuantity) },
+          { label: "FT Cost", value: dashboardMoney(productionTotals.ftCost) },
+          { label: "HH Qty", value: dashboardQuantity(productionTotals.hhQuantity) },
+          { label: "HH Cost", value: dashboardMoney(productionTotals.hhCost) },
         ],
         Summary: [
           { label: "Production Records", value: String(dashboardProductionRecords.length) },
           { label: "Inventory Items", value: String(inventoryItems.length) },
-          { label: "Net Value", value: formatMoney(productionTotals.netValue) },
+          { label: "Net Value", value: dashboardMoney(productionTotals.netValue) },
         ],
         "TOP Companies": [
           { label: "Registered Companies", value: String(companies.length) },
@@ -1106,6 +1224,51 @@ export default function Home() {
             </button>
 
             <button
+              aria-label={
+                areDashboardValuesVisible
+                  ? "Hide dashboard values"
+                  : "Show dashboard values"
+              }
+              className="flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 text-slate-700 transition hover:bg-slate-100"
+              onClick={() =>
+                setAreDashboardValuesVisible((current) => !current)
+              }
+              type="button"
+            >
+              {areDashboardValuesVisible ? (
+                <svg
+                  aria-hidden="true"
+                  className="h-5 w-5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  viewBox="0 0 24 24"
+                >
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                  <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                  <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+                  <path d="m1 1 22 22" />
+                </svg>
+              ) : (
+                <svg
+                  aria-hidden="true"
+                  className="h-5 w-5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  viewBox="0 0 24 24"
+                >
+                  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              )}
+            </button>
+
+            <button
               className="rounded-xl border border-slate-200 px-4 py-2 text-left text-sm font-bold text-slate-700 transition hover:bg-slate-100"
               onClick={exportDashboardToPdf}
               type="button"
@@ -1159,7 +1322,7 @@ export default function Home() {
           </div>
 
           <div id="dashboard-report">
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {dashboardCards.map((card) => (
                 <MetricCard
                   key={card.label}
@@ -1182,7 +1345,7 @@ export default function Home() {
                     <DashboardDetailRow
                       key={item.id}
                       title={`Inventory #${item.id}`}
-                      value={formatMoney(toNumber(item.value))}
+                      value={dashboardMoney(toNumber(item.value))}
                     >
                       {item.description} | VN: {item.vn} | Plate: {item.plate}
                     </DashboardDetailRow>
@@ -1234,7 +1397,12 @@ export default function Home() {
                       title={employee.name}
                       value={employee.phone}
                     >
-                      Employee record
+                      {[
+                        employee.ssn ? `SSN: ${employee.ssn}` : null,
+                        employee.itn ? `ITN: ${employee.itn}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" | ") || "Employee record"}
                     </DashboardDetailRow>
                   ))
                 )
@@ -1248,7 +1416,7 @@ export default function Home() {
                     <DashboardDetailRow
                       key={item.name}
                       title={item.name}
-                      value={formatMoney(item.total)}
+                      value={dashboardMoney(item.total)}
                     >
                       Entries: {item.count}
                     </DashboardDetailRow>
@@ -1272,13 +1440,162 @@ export default function Home() {
                       <DashboardDetailRow
                         key={record.id}
                         title={`Production #${record.number}`}
-                        value={formatMoney(totals.netValue)}
+                        value={dashboardMoney(totals.netValue)}
                       >
                         {formatDate(record.date)} | {getCompanyName(record.companyId)} |{" "}
-                        {record.group} | Total: {formatMoney(totals.totalValue)}
+                        {record.group} | Total: {dashboardMoney(totals.totalValue)}
                       </DashboardDetailRow>
                     );
                   })
+                )
+              ) : null}
+
+              {activeDashboard === "Production by FT" ? (
+                productionByDay.length === 0 ? (
+                  <EmptyState message="No production by FT found." />
+                ) : (
+                  <>
+                    {productionByDay.map((day) => (
+                      <article
+                        className="rounded-xl border border-slate-200 bg-slate-50 p-4"
+                        key={day.date}
+                      >
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <h4 className="font-bold text-slate-950">
+                            {formatDate(day.date)}
+                          </h4>
+                          <p className="text-sm font-bold text-slate-950">
+                            {dashboardQuantity(day.ftQuantity)} FT |{" "}
+                            {dashboardMoney(day.ftCost)}
+                            <br />
+                            {dashboardQuantity(day.hhQuantity)} HH |{" "}
+                            {dashboardMoney(day.hhCost)}
+                          </p>
+                        </div>
+                        <div className="mt-3 grid gap-2">
+                          {day.records.map(({ record, totals }) => (
+                            <p
+                              className="text-sm leading-6 text-slate-600"
+                              key={record.id}
+                            >
+                              #{record.number} |{" "}
+                              {getCompanyName(record.companyId) || "No company"}{" "}
+                              | {record.group}
+                              <br />
+                              FT: {dashboardQuantity(totals.ftQuantity)} @{" "}
+                              {dashboardMoney(totals.costFtUnit)} ={" "}
+                              {dashboardMoney(totals.ftCost)}
+                              <br />
+                              HH 17x30: {dashboardQuantity(totals.hh17x30)} | HH
+                              24x36: {dashboardQuantity(totals.hh24x36)} |{" "}
+                              {dashboardQuantity(totals.hhQuantity)} HH @{" "}
+                              {dashboardMoney(totals.costHhUnit)} ={" "}
+                              {dashboardMoney(totals.hhCost)}
+                            </p>
+                          ))}
+                        </div>
+                      </article>
+                    ))}
+
+                    <article className="rounded-xl border border-slate-950 bg-slate-950 p-5 text-white">
+                      <h4 className="text-lg font-bold">Period Summary</h4>
+                      <p className="mt-2 text-sm text-slate-300">
+                        {dashboardDateFrom || dashboardDateTo
+                          ? `${dashboardDateFrom ? formatDate(dashboardDateFrom) : "Start"} to ${
+                              dashboardDateTo ? formatDate(dashboardDateTo) : "today"
+                            }`
+                          : "All production records"}
+                        {dashboardCompanyFilter
+                          ? ` | ${getCompanyName(dashboardCompanyFilter)}`
+                          : ""}
+                        {dashboardGroupFilter ? ` | Group: ${dashboardGroupFilter}` : ""}
+                      </p>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        <p className="text-sm">
+                          Total FT:{" "}
+                          <span className="font-bold">
+                            {dashboardQuantity(productionTotals.ftQuantity)}
+                          </span>
+                        </p>
+                        <p className="text-sm">
+                          FT Cost:{" "}
+                          <span className="font-bold">
+                            {dashboardMoney(productionTotals.ftCost)}
+                          </span>
+                        </p>
+                        <p className="text-sm">
+                          Avg. Cost / FT:{" "}
+                          <span className="font-bold">
+                            {dashboardMoney(
+                              productionTotals.ftQuantity
+                                ? productionTotals.ftCost /
+                                    productionTotals.ftQuantity
+                                : 0,
+                            )}
+                          </span>
+                        </p>
+                        <p className="text-sm">
+                          HH 17x30:{" "}
+                          <span className="font-bold">
+                            {dashboardQuantity(productionTotals.hh17x30)}
+                          </span>
+                        </p>
+                        <p className="text-sm">
+                          HH 24x36:{" "}
+                          <span className="font-bold">
+                            {dashboardQuantity(productionTotals.hh24x36)}
+                          </span>
+                        </p>
+                        <p className="text-sm">
+                          Total HH:{" "}
+                          <span className="font-bold">
+                            {dashboardQuantity(productionTotals.hhQuantity)}
+                          </span>
+                        </p>
+                        <p className="text-sm">
+                          HH Cost:{" "}
+                          <span className="font-bold">
+                            {dashboardMoney(productionTotals.hhCost)}
+                          </span>
+                        </p>
+                        <p className="text-sm">
+                          Avg. Cost / HH:{" "}
+                          <span className="font-bold">
+                            {dashboardMoney(
+                              productionTotals.hhQuantity
+                                ? productionTotals.hhCost /
+                                    productionTotals.hhQuantity
+                                : 0,
+                            )}
+                          </span>
+                        </p>
+                        <p className="text-sm sm:col-span-2">
+                          Total cost (FT + HH):{" "}
+                          <span className="font-bold">
+                            {dashboardMoney(
+                              productionTotals.ftCost + productionTotals.hhCost,
+                            )}
+                          </span>
+                        </p>
+                        <p className="text-sm">
+                          Days:{" "}
+                          <span className="font-bold">{productionByDay.length}</span>
+                        </p>
+                        <p className="text-sm">
+                          Records:{" "}
+                          <span className="font-bold">
+                            {dashboardProductionRecords.length}
+                          </span>
+                        </p>
+                        <p className="text-sm sm:col-span-2">
+                          Companies:{" "}
+                          <span className="font-bold">
+                            {productionCompanyNames.join(", ") || "None"}
+                          </span>
+                        </p>
+                      </div>
+                    </article>
+                  </>
                 )
               ) : null}
               </div>
@@ -2082,7 +2399,12 @@ export default function Home() {
     if (activeSection === "Employees") {
       const normalizedEmployeeFilter = employeeFilter.toLowerCase();
       const filteredEmployees = employees.filter((employee) =>
-        [employee.name, employee.phone]
+        [
+          employee.name,
+          employee.phone,
+          employee.ssn ?? "",
+          employee.itn ?? "",
+        ]
           .join(" ")
           .toLowerCase()
           .includes(normalizedEmployeeFilter),
@@ -2123,9 +2445,25 @@ export default function Home() {
                     key={employee.id}
                     onDelete={() => deleteEmployee(employee.id)}
                     onEdit={() => editEmployee(employee)}
+                    onPhotoClick={setImagePreview}
+                    photos={[employee.ssn_photo, employee.itn_photo].filter(
+                      (photo): photo is string => Boolean(photo),
+                    )}
                     title={employee.name}
                   >
                     {employee.phone}
+                    {employee.ssn ? (
+                      <>
+                        <br />
+                        SSN: {employee.ssn}
+                      </>
+                    ) : null}
+                    {employee.itn ? (
+                      <>
+                        <br />
+                        ITN: {employee.itn}
+                      </>
+                    ) : null}
                   </RecordCard>
                 ))
               )}
@@ -2152,7 +2490,47 @@ export default function Home() {
                   }
                   value={employeeForm.phone}
                 />
-                <FormActions isEditing={Boolean(editingEmployeeId)} />
+                <TextField
+                  label="SSN"
+                  onChange={(value) =>
+                    setEmployeeForm((current) => ({ ...current, ssn: value }))
+                  }
+                  required={false}
+                  value={employeeForm.ssn}
+                />
+                <TextField
+                  label="ITN"
+                  onChange={(value) =>
+                    setEmployeeForm((current) => ({ ...current, itn: value }))
+                  }
+                  required={false}
+                  value={employeeForm.itn}
+                />
+                <PhotoField
+                  label="SSN Photo"
+                  multiple={false}
+                  onChange={(photos) =>
+                    setEmployeeForm((current) => ({
+                      ...current,
+                      ssn_photo: photos[0] ?? "",
+                    }))
+                  }
+                  value={employeeForm.ssn_photo ? [employeeForm.ssn_photo] : []}
+                />
+                <PhotoField
+                  label="ITN Photo"
+                  multiple={false}
+                  onChange={(photos) =>
+                    setEmployeeForm((current) => ({
+                      ...current,
+                      itn_photo: photos[0] ?? "",
+                    }))
+                  }
+                  value={employeeForm.itn_photo ? [employeeForm.itn_photo] : []}
+                />
+                <div className="md:col-span-2">
+                  <FormActions isEditing={Boolean(editingEmployeeId)} />
+                </div>
               </form>
             </Modal>
           ) : null}
@@ -2521,12 +2899,14 @@ function TextField({
   label,
   onChange,
   placeholder,
+  required = true,
   type = "text",
   value,
 }: {
   label: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  required?: boolean;
   type?: "date" | "number" | "password" | "text";
   value: string;
 }) {
@@ -2538,6 +2918,7 @@ function TextField({
         label={label}
         onChange={onChange}
         placeholder={placeholder}
+        required={required}
         value={value}
       />
     );
@@ -2553,7 +2934,7 @@ function TextField({
         id={id}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        required
+        required={required}
         step={type === "number" ? "0.01" : undefined}
         type={type}
         value={value}
@@ -2680,10 +3061,12 @@ function MoneyField({
 
 function PhotoField({
   label,
+  multiple = true,
   onChange,
   value,
 }: {
   label: string;
+  multiple?: boolean;
   onChange: (value: string[]) => void;
   value: string[];
 }) {
@@ -2695,7 +3078,8 @@ function PhotoField({
     }
 
     const images = await Promise.all(files.map(readImageFile));
-    onChange([...value, ...images]);
+    onChange(multiple ? [...value, ...images] : images.slice(0, 1));
+    event.target.value = "";
   }
 
   return (
@@ -2708,7 +3092,7 @@ function PhotoField({
           accept="image/*"
           className="block w-full text-sm text-slate-600 file:mr-4 file:rounded-xl file:border-0 file:bg-slate-950 file:px-4 file:py-2 file:text-sm file:font-bold file:text-white"
           id={label}
-          multiple
+          multiple={multiple}
           onChange={handleFileChange}
           type="file"
         />
@@ -2717,7 +3101,7 @@ function PhotoField({
             {value.map((image, index) => (
               <div className="relative" key={`${image}-${index}`}>
                 <Image
-                  alt={`Asset preview ${index + 1}`}
+                  alt={`${label} preview ${index + 1}`}
                   className="h-28 w-full rounded-xl object-cover"
                   height={112}
                   src={image}
