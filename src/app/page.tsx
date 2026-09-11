@@ -32,6 +32,11 @@ type Customer = {
   state: string;
 };
 
+type EmployeeGroup = {
+  id: number;
+  name: string;
+};
+
 type Employee = {
   id: number;
   name: string;
@@ -40,6 +45,7 @@ type Employee = {
   itn?: string | null;
   ssn_photo?: string | null;
   itn_photo?: string | null;
+  group_id?: number | null;
 };
 
 type UserRecord = {
@@ -107,6 +113,11 @@ const emptyEmployee = {
   itn: "",
   ssn_photo: "",
   itn_photo: "",
+  group_id: "",
+};
+
+const emptyEmployeeGroup = {
+  name: "",
 };
 
 const emptyUser = {
@@ -244,6 +255,7 @@ export default function Home() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [employeeGroups, setEmployeeGroups] = useState<EmployeeGroup[]>([]);
   const [users, setUsers] = useState<UserRecord[]>([
     { id: 1, name: "Admin", password: "admin", username: "admin" },
   ]);
@@ -255,6 +267,7 @@ export default function Home() {
   const [companyForm, setCompanyForm] = useState(emptyCompany);
   const [customerForm, setCustomerForm] = useState(emptyCustomer);
   const [employeeForm, setEmployeeForm] = useState(emptyEmployee);
+  const [employeeGroupForm, setEmployeeGroupForm] = useState(emptyEmployeeGroup);
   const [userForm, setUserForm] = useState(emptyUser);
   const [inventoryForm, setInventoryForm] = useState(emptyInventoryItem);
   const [expenseTypeForm, setExpenseTypeForm] = useState(emptyExpenseType);
@@ -265,6 +278,9 @@ export default function Home() {
   const [editingCompanyId, setEditingCompanyId] = useState<number | null>(null);
   const [editingCustomerId, setEditingCustomerId] = useState<number | null>(null);
   const [editingEmployeeId, setEditingEmployeeId] = useState<number | null>(null);
+  const [editingEmployeeGroupId, setEditingEmployeeGroupId] = useState<
+    number | null
+  >(null);
   const [editingUserId, setEditingUserId] = useState<number | null>(null);
   const [editingInventoryId, setEditingInventoryId] = useState<number | null>(
     null,
@@ -278,6 +294,8 @@ export default function Home() {
   const [isCompanyModalOpen, setIsCompanyModalOpen] = useState(false);
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
+  const [isEmployeeGroupModalOpen, setIsEmployeeGroupModalOpen] =
+    useState(false);
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [isInventoryModalOpen, setIsInventoryModalOpen] = useState(false);
   const [isExpenseTypeModalOpen, setIsExpenseTypeModalOpen] = useState(false);
@@ -285,6 +303,10 @@ export default function Home() {
   const [companyFilter, setCompanyFilter] = useState("");
   const [customerFilter, setCustomerFilter] = useState("");
   const [employeeFilter, setEmployeeFilter] = useState("");
+  const [employeeGroupFilter, setEmployeeGroupFilter] = useState("");
+  const [selectedEmployeeGroupId, setSelectedEmployeeGroupId] = useState<
+    number | "unassigned" | null
+  >(null);
   const [userFilter, setUserFilter] = useState("");
   const [inventoryFilter, setInventoryFilter] = useState("");
   const [expenseTypeFilter, setExpenseTypeFilter] = useState("");
@@ -345,6 +367,7 @@ export default function Home() {
         companyData,
         customerData,
         employeeData,
+        employeeGroupData,
         userData,
         inventoryData,
         expenseTypeData,
@@ -353,6 +376,7 @@ export default function Home() {
         apiRequest<Company[]>("/api/companies"),
         apiRequest<Customer[]>("/api/customers"),
         apiRequest<Employee[]>("/api/employees"),
+        apiRequest<EmployeeGroup[]>("/api/employee-groups").catch(() => []),
         apiRequest<UserRecord[]>("/api/users"),
         apiRequest<InventoryItem[]>("/api/inventory"),
         apiRequest<ExpenseType[]>("/api/expense-types"),
@@ -362,6 +386,7 @@ export default function Home() {
       setCompanies(companyData);
       setCustomers(customerData);
       setEmployees(employeeData);
+      setEmployeeGroups(employeeGroupData);
       setUsers(userData);
       setInventoryItems(inventoryData);
       setExpenseTypes(expenseTypeData);
@@ -394,6 +419,10 @@ export default function Home() {
 
     if (section !== "Dashboards") {
       setAreDashboardValuesVisible(false);
+    }
+
+    if (section !== "Employees") {
+      setSelectedEmployeeGroupId(null);
     }
   }
 
@@ -580,6 +609,7 @@ export default function Home() {
       itn: employee.itn ?? "",
       ssn_photo: employee.ssn_photo ?? "",
       itn_photo: employee.itn_photo ?? "",
+      group_id: employee.group_id ? String(employee.group_id) : "",
     });
     setEditingEmployeeId(employee.id);
     setIsEmployeeModalOpen(true);
@@ -593,6 +623,68 @@ export default function Home() {
       setEditingEmployeeId(null);
       setEmployeeForm(emptyEmployee);
       setIsEmployeeModalOpen(false);
+    }
+  }
+
+  async function saveEmployeeGroup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (editingEmployeeGroupId) {
+      const savedGroup = await apiRequest<EmployeeGroup>(
+        "/api/employee-groups",
+        {
+          body: JSON.stringify({
+            id: editingEmployeeGroupId,
+            ...employeeGroupForm,
+          }),
+          method: "PUT",
+        },
+      );
+      setEmployeeGroups((current) =>
+        current.map((group) =>
+          group.id === editingEmployeeGroupId ? savedGroup : group,
+        ),
+      );
+      setEditingEmployeeGroupId(null);
+    } else {
+      const savedGroup = await apiRequest<EmployeeGroup>(
+        "/api/employee-groups",
+        {
+          body: JSON.stringify(employeeGroupForm),
+          method: "POST",
+        },
+      );
+      setEmployeeGroups((current) => [...current, savedGroup]);
+      setSelectedEmployeeGroupId(savedGroup.id);
+    }
+
+    setEmployeeGroupForm(emptyEmployeeGroup);
+    setIsEmployeeGroupModalOpen(false);
+  }
+
+  function editEmployeeGroup(group: EmployeeGroup) {
+    setEmployeeGroupForm({ name: group.name });
+    setEditingEmployeeGroupId(group.id);
+    setIsEmployeeGroupModalOpen(true);
+  }
+
+  async function deleteEmployeeGroup(id: number) {
+    if (employees.some((employee) => employee.group_id === id)) {
+      window.alert("Move or delete employees in this group first.");
+      return;
+    }
+
+    await apiRequest(`/api/employee-groups?id=${id}`, { method: "DELETE" });
+    setEmployeeGroups((current) => current.filter((group) => group.id !== id));
+
+    if (selectedEmployeeGroupId === id) {
+      setSelectedEmployeeGroupId(null);
+    }
+
+    if (editingEmployeeGroupId === id) {
+      setEditingEmployeeGroupId(null);
+      setEmployeeGroupForm(emptyEmployeeGroup);
+      setIsEmployeeGroupModalOpen(false);
     }
   }
 
@@ -881,6 +973,16 @@ export default function Home() {
     );
   }
 
+  function getEmployeeGroupName(id?: number | null) {
+    if (!id) {
+      return "Unassigned";
+    }
+
+    return (
+      employeeGroups.find((group) => group.id === id)?.name ?? "Unassigned"
+    );
+  }
+
   function toNumber(value: string) {
     return Number(value || 0);
   }
@@ -1101,7 +1203,7 @@ export default function Home() {
         ],
         "Employees Report": [
           { label: "Employees", value: String(employees.length) },
-          { label: "Phone Records", value: String(employees.length) },
+          { label: "Groups", value: String(employeeGroups.length) },
           { label: "Active Records", value: String(employees.length) },
         ],
         "Expense Report": [
@@ -1398,6 +1500,7 @@ export default function Home() {
                       value={employee.phone}
                     >
                       {[
+                        getEmployeeGroupName(employee.group_id),
                         employee.ssn ? `SSN: ${employee.ssn}` : null,
                         employee.itn ? `ITN: ${employee.itn}` : null,
                       ]
@@ -2397,8 +2500,20 @@ export default function Home() {
     }
 
     if (activeSection === "Employees") {
+      const selectedEmployeeGroup =
+        selectedEmployeeGroupId === "unassigned"
+          ? null
+          : employeeGroups.find((group) => group.id === selectedEmployeeGroupId);
+      const unassignedEmployees = employees.filter(
+        (employee) => !employee.group_id,
+      );
+      const employeesInSelectedGroup = employees.filter((employee) =>
+        selectedEmployeeGroupId === "unassigned"
+          ? !employee.group_id
+          : employee.group_id === selectedEmployeeGroupId,
+      );
       const normalizedEmployeeFilter = employeeFilter.toLowerCase();
-      const filteredEmployees = employees.filter((employee) =>
+      const filteredEmployees = employeesInSelectedGroup.filter((employee) =>
         [
           employee.name,
           employee.phone,
@@ -2409,27 +2524,154 @@ export default function Home() {
           .toLowerCase()
           .includes(normalizedEmployeeFilter),
       );
+      const normalizedEmployeeGroupFilter = employeeGroupFilter.toLowerCase();
+      const filteredEmployeeGroups = employeeGroups.filter((group) =>
+        group.name.toLowerCase().includes(normalizedEmployeeGroupFilter),
+      );
+
+      if (selectedEmployeeGroupId === null) {
+        return (
+          <>
+            <RegistryPanel
+              action={
+                <button
+                  aria-label="New employee group"
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-2xl font-bold leading-none text-white transition hover:bg-slate-800"
+                  onClick={() => {
+                    setEmployeeGroupForm(emptyEmployeeGroup);
+                    setEditingEmployeeGroupId(null);
+                    setIsEmployeeGroupModalOpen(true);
+                  }}
+                  type="button"
+                >
+                  +
+                </button>
+              }
+              description="Register groups, then open a group to add employees."
+              title="Employee Groups"
+            >
+              <FilterField
+                label="Search groups"
+                onChange={setEmployeeGroupFilter}
+                value={employeeGroupFilter}
+              />
+
+              <div className="mt-6 grid gap-3">
+                {filteredEmployeeGroups.length === 0 &&
+                unassignedEmployees.length === 0 ? (
+                  <EmptyState message="No employee groups found." />
+                ) : (
+                  <>
+                    {filteredEmployeeGroups.map((group) => {
+                      const groupCount = employees.filter(
+                        (employee) => employee.group_id === group.id,
+                      ).length;
+
+                      return (
+                        <RecordCard
+                          detailLabel="Open"
+                          key={group.id}
+                          onDelete={() => deleteEmployeeGroup(group.id)}
+                          onDetail={() => {
+                            setEmployeeFilter("");
+                            setSelectedEmployeeGroupId(group.id);
+                          }}
+                          onEdit={() => editEmployeeGroup(group)}
+                          title={group.name}
+                        >
+                          {groupCount}{" "}
+                          {groupCount === 1 ? "employee" : "employees"}
+                        </RecordCard>
+                      );
+                    })}
+                    {unassignedEmployees.length > 0 ? (
+                      <RecordCard
+                        detailLabel="Open"
+                        onDetail={() => {
+                          setEmployeeFilter("");
+                          setSelectedEmployeeGroupId("unassigned");
+                        }}
+                        title="Unassigned"
+                      >
+                        {unassignedEmployees.length}{" "}
+                        {unassignedEmployees.length === 1
+                          ? "employee"
+                          : "employees"}
+                      </RecordCard>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            </RegistryPanel>
+
+            {isEmployeeGroupModalOpen ? (
+              <Modal
+                onClose={() => setIsEmployeeGroupModalOpen(false)}
+                title={
+                  editingEmployeeGroupId
+                    ? "Edit Employee Group"
+                    : "New Employee Group"
+                }
+              >
+                <form className="grid gap-4" onSubmit={saveEmployeeGroup}>
+                  <TextField
+                    label="Group name"
+                    onChange={(value) =>
+                      setEmployeeGroupForm((current) => ({
+                        ...current,
+                        name: value,
+                      }))
+                    }
+                    value={employeeGroupForm.name}
+                  />
+                  <FormActions isEditing={Boolean(editingEmployeeGroupId)} />
+                </form>
+              </Modal>
+            ) : null}
+          </>
+        );
+      }
 
       return (
         <>
           <RegistryPanel
             action={
-              <button
-                aria-label="New employee"
-                className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-2xl font-bold leading-none text-white transition hover:bg-slate-800"
-                onClick={() => {
-                  setEmployeeForm(emptyEmployee);
-                  setEditingEmployeeId(null);
-                  setIsEmployeeModalOpen(true);
-                }}
-                type="button"
-              >
-                +
-              </button>
+              selectedEmployeeGroupId === "unassigned" ? undefined : (
+                <button
+                  aria-label="New employee"
+                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-2xl font-bold leading-none text-white transition hover:bg-slate-800"
+                  onClick={() => {
+                    setEmployeeForm({
+                      ...emptyEmployee,
+                      group_id: String(selectedEmployeeGroupId),
+                    });
+                    setEditingEmployeeId(null);
+                    setIsEmployeeModalOpen(true);
+                  }}
+                  type="button"
+                >
+                  +
+                </button>
+              )
             }
-            description="Search and manage employee records."
-            title="Employees"
+            description="Search and manage employee records in this group."
+            title={
+              selectedEmployeeGroupId === "unassigned"
+                ? "Unassigned"
+                : selectedEmployeeGroup?.name ?? "Employees"
+            }
           >
+            <button
+              className="mb-4 text-left text-sm font-bold text-slate-600 transition hover:text-slate-950"
+              onClick={() => {
+                setSelectedEmployeeGroupId(null);
+                setEmployeeFilter("");
+              }}
+              type="button"
+            >
+              Back to groups
+            </button>
+
             <FilterField
               label="Search employees"
               onChange={setEmployeeFilter}
@@ -2438,7 +2680,7 @@ export default function Home() {
 
             <div className="mt-6 grid gap-3">
               {filteredEmployees.length === 0 ? (
-                <EmptyState message="No employees found." />
+                <EmptyState message="No employees found in this group." />
               ) : (
                 filteredEmployees.map((employee) => (
                   <RecordCard
@@ -2476,6 +2718,21 @@ export default function Home() {
               title={editingEmployeeId ? "Edit Employee" : "New Employee"}
             >
               <form className="grid gap-4 md:grid-cols-2" onSubmit={saveEmployee}>
+                <SelectField
+                  label="Group"
+                  onChange={(value) =>
+                    setEmployeeForm((current) => ({
+                      ...current,
+                      group_id: value,
+                    }))
+                  }
+                  options={employeeGroups.map((group) => ({
+                    label: group.name,
+                    value: String(group.id),
+                  }))}
+                  placeholder="Select a group"
+                  value={employeeForm.group_id}
+                />
                 <TextField
                   label="Name"
                   onChange={(value) =>
@@ -3326,6 +3583,7 @@ function EmptyState({ message }: { message: string }) {
 
 function RecordCard({
   children,
+  detailLabel = "Details",
   onDelete,
   onDetail,
   onEdit,
@@ -3334,9 +3592,10 @@ function RecordCard({
   title,
 }: {
   children: React.ReactNode;
-  onDelete: () => void;
+  detailLabel?: string;
+  onDelete?: () => void;
   onDetail?: () => void;
-  onEdit: () => void;
+  onEdit?: () => void;
   onPhotoClick?: (image: string) => void;
   photos?: string[];
   title: string;
@@ -3382,23 +3641,27 @@ function RecordCard({
             onClick={onDetail}
             type="button"
           >
-            Details
+            {detailLabel}
           </button>
         ) : null}
-        <button
-          className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
-          onClick={onEdit}
-          type="button"
-        >
-          Edit
-        </button>
-        <button
-          className="rounded-xl bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100"
-          onClick={onDelete}
-          type="button"
-        >
-          Delete
-        </button>
+        {onEdit ? (
+          <button
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+            onClick={onEdit}
+            type="button"
+          >
+            Edit
+          </button>
+        ) : null}
+        {onDelete ? (
+          <button
+            className="rounded-xl bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100"
+            onClick={onDelete}
+            type="button"
+          >
+            Delete
+          </button>
+        ) : null}
       </div>
     </article>
   );

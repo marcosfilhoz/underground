@@ -7,6 +7,7 @@ const handlers = createSimpleCrudHandlers("employees", (body) => ({
   itn: body.itn || null,
   ssn_photo: body.ssn_photo || null,
   itn_photo: body.itn_photo || null,
+  group_id: body.group_id ? Number(body.group_id) : null,
 }));
 
 export const GET = handlers.GET;
