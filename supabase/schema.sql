@@ -99,3 +99,13 @@ create table if not exists production_expenses (
 insert into app_users (name, username, password)
 values ('Admin', 'admin', 'admin')
 on conflict (username) do nothing;
+
+create table if not exists app_settings (
+  id bigint primary key,
+  logo text,
+  updated_at timestamptz not null default now()
+);
+
+insert into app_settings (id, logo)
+values (1, null)
+on conflict (id) do nothing;

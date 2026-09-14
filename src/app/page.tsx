@@ -296,6 +296,7 @@ export default function Home() {
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [isEmployeeGroupModalOpen, setIsEmployeeGroupModalOpen] =
     useState(false);
+  const [employeeGroupError, setEmployeeGroupError] = useState("");
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [isInventoryModalOpen, setIsInventoryModalOpen] = useState(false);
   const [isExpenseTypeModalOpen, setIsExpenseTypeModalOpen] = useState(false);
@@ -325,6 +326,9 @@ export default function Home() {
   const [productionDetail, setProductionDetail] =
     useState<ProductionRecord | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [appLogo, setAppLogo] = useState("");
+  const [logoForm, setLogoForm] = useState("");
+  const [settingsError, setSettingsError] = useState("");
 
   const menuItems = [
     { label: "Home", description: "Main workspace", icon: "HO" },
@@ -336,6 +340,7 @@ export default function Home() {
     { label: "Employees", description: "Team records and access", icon: "EM" },
     { label: "Users", description: "Manage system users", icon: "US" },
     { label: "Expense Types", description: "Manage expense categories", icon: "EX" },
+    { label: "Settings", description: "Logo and system preferences", icon: "ST" },
   ] satisfies Array<{
     label: SectionName;
     description: string;
@@ -356,6 +361,16 @@ export default function Home() {
     "TOP Companies",
     "TOP Customers",
   ];
+
+  useEffect(() => {
+    apiRequest<{ logo?: string | null }>("/api/settings")
+      .then((data) => {
+        const logo = data.logo ?? "";
+        setAppLogo(logo);
+        setLogoForm(logo);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!isLoggedIn) {
@@ -468,7 +483,13 @@ export default function Home() {
           </style>
         </head>
         <body>
-          <h1>${activeDashboard}</h1>
+          ${
+            appLogo
+              ? `<img src="${appLogo}" alt="Logo" style="height:56px;margin-bottom:16px;" />`
+              : ""
+          }
+          <h1>Sys Underground</h1>
+          <h2>${activeDashboard}</h2>
           ${report.innerHTML}
         </body>
       </html>
@@ -476,6 +497,61 @@ export default function Home() {
     printWindow.document.close();
     printWindow.focus();
     printWindow.print();
+  }
+
+  async function exportDashboardToExcel(title: string, rows: string[][]) {
+    const response = await fetch("/api/reports/excel", {
+      body: JSON.stringify({
+        logo: appLogo,
+        rows,
+        title,
+      }),
+      headers: {
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.download = `${title.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-")}.xlsx`;
+    link.href = url;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function saveSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSettingsError("");
+
+    try {
+      const savedSettings = await apiRequest<{ logo?: string | null }>(
+        "/api/settings",
+        {
+          body: JSON.stringify({ logo: logoForm }),
+          method: "PUT",
+        },
+      );
+      const logo = savedSettings.logo ?? "";
+      setAppLogo(logo);
+      setLogoForm(logo);
+    } catch (error) {
+      const message = (error as Error).message;
+      const missingTable = /app_settings|schema cache|does not exist|relation/i.test(
+        message,
+      );
+
+      setSettingsError(
+        missingTable
+          ? "Settings table is missing in Supabase. Run supabase/schema.sql and try again."
+          : message,
+      );
+    }
   }
 
   async function saveCompany(event: FormEvent<HTMLFormElement>) {
@@ -628,43 +704,57 @@ export default function Home() {
 
   async function saveEmployeeGroup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setEmployeeGroupError("");
 
-    if (editingEmployeeGroupId) {
-      const savedGroup = await apiRequest<EmployeeGroup>(
-        "/api/employee-groups",
-        {
-          body: JSON.stringify({
-            id: editingEmployeeGroupId,
-            ...employeeGroupForm,
-          }),
-          method: "PUT",
-        },
+    try {
+      if (editingEmployeeGroupId) {
+        const savedGroup = await apiRequest<EmployeeGroup>(
+          "/api/employee-groups",
+          {
+            body: JSON.stringify({
+              id: editingEmployeeGroupId,
+              ...employeeGroupForm,
+            }),
+            method: "PUT",
+          },
+        );
+        setEmployeeGroups((current) =>
+          current.map((group) =>
+            group.id === editingEmployeeGroupId ? savedGroup : group,
+          ),
+        );
+        setEditingEmployeeGroupId(null);
+      } else {
+        const savedGroup = await apiRequest<EmployeeGroup>(
+          "/api/employee-groups",
+          {
+            body: JSON.stringify(employeeGroupForm),
+            method: "POST",
+          },
+        );
+        setEmployeeGroups((current) => [...current, savedGroup]);
+        setSelectedEmployeeGroupId(savedGroup.id);
+      }
+
+      setEmployeeGroupForm(emptyEmployeeGroup);
+      setIsEmployeeGroupModalOpen(false);
+    } catch (error) {
+      const message = (error as Error).message;
+      const missingTable =
+        /employee_groups|schema cache|does not exist|relation/i.test(message);
+
+      setEmployeeGroupError(
+        missingTable
+          ? "Employee groups table is missing in Supabase. Run supabase/schema.sql and try again."
+          : message,
       );
-      setEmployeeGroups((current) =>
-        current.map((group) =>
-          group.id === editingEmployeeGroupId ? savedGroup : group,
-        ),
-      );
-      setEditingEmployeeGroupId(null);
-    } else {
-      const savedGroup = await apiRequest<EmployeeGroup>(
-        "/api/employee-groups",
-        {
-          body: JSON.stringify(employeeGroupForm),
-          method: "POST",
-        },
-      );
-      setEmployeeGroups((current) => [...current, savedGroup]);
-      setSelectedEmployeeGroupId(savedGroup.id);
     }
-
-    setEmployeeGroupForm(emptyEmployeeGroup);
-    setIsEmployeeGroupModalOpen(false);
   }
 
   function editEmployeeGroup(group: EmployeeGroup) {
     setEmployeeGroupForm({ name: group.name });
     setEditingEmployeeGroupId(group.id);
+    setEmployeeGroupError("");
     setIsEmployeeGroupModalOpen(true);
   }
 
@@ -1259,6 +1349,172 @@ export default function Home() {
         ],
         }[activeDashboard] ?? [];
 
+      const excelRows: string[][] = [
+        ["Date from", dashboardDateFrom ? formatDate(dashboardDateFrom) : "All"],
+        ["Date to", dashboardDateTo ? formatDate(dashboardDateTo) : "All"],
+        [
+          "Company",
+          dashboardCompanyFilter
+            ? getCompanyName(dashboardCompanyFilter)
+            : "All companies",
+        ],
+        ["Group", dashboardGroupFilter || "All groups"],
+        [],
+        ["Summary"],
+        ["Indicator", "Value"],
+        ...(
+          {
+            "Companies Report": [
+              ["Companies", String(companies.length)],
+            ],
+            "Customers Report": [
+              ["Customers", String(customers.length)],
+            ],
+            "Employees Report": [
+              ["Employees", String(employees.length)],
+              ["Groups", String(employeeGroups.length)],
+            ],
+            "Expense Report": [
+              ["Expense Total", formatMoney(filteredExpenseTotal)],
+              ["Production Records", String(dashboardProductionRecords.length)],
+            ],
+            "Expense Totals": [
+              ["Expense Total", formatMoney(filteredExpenseTotal)],
+              ["Expense Entries", String(filteredDashboardExpenses.length)],
+            ],
+            "Financial Analysis": [
+              ["Total Value", formatMoney(productionTotals.totalValue)],
+              ["Expenses", formatMoney(productionTotals.expenseTotal)],
+              ["Net Value", formatMoney(productionTotals.netValue)],
+            ],
+            "Inventory Report": [
+              ["Inventory Items", String(inventoryItems.length)],
+              [
+                "Inventory Value",
+                formatMoney(
+                  inventoryItems.reduce(
+                    (total, item) => total + toNumber(item.value),
+                    0,
+                  ),
+                ),
+              ],
+            ],
+            "Production Report": [
+              ["Production Records", String(dashboardProductionRecords.length)],
+              ["Total Value", formatMoney(productionTotals.totalValue)],
+              ["Net Value", formatMoney(productionTotals.netValue)],
+            ],
+            "Production by FT": [
+              ["Total FT", formatQuantity(productionTotals.ftQuantity)],
+              ["FT Cost", formatMoney(productionTotals.ftCost)],
+              ["HH Qty", formatQuantity(productionTotals.hhQuantity)],
+              ["HH Cost", formatMoney(productionTotals.hhCost)],
+              [
+                "Total cost (FT + HH)",
+                formatMoney(productionTotals.ftCost + productionTotals.hhCost),
+              ],
+            ],
+            Summary: [
+              ["Production Records", String(dashboardProductionRecords.length)],
+              ["Inventory Items", String(inventoryItems.length)],
+              ["Net Value", formatMoney(productionTotals.netValue)],
+            ],
+            "TOP Companies": [
+              ["Registered Companies", String(companies.length)],
+            ],
+            "TOP Customers": [
+              ["Registered Customers", String(customers.length)],
+            ],
+          }[activeDashboard] ?? []
+        ),
+        [],
+        ["Details"],
+        ...(activeDashboard === "Production by FT"
+          ? [
+              ["Date", "Company", "Group", "FT", "FT Cost", "HH", "HH Cost"],
+              ...productionByDay.flatMap((day) =>
+                day.records.map(({ record, totals }) => [
+                  formatDate(day.date),
+                  getCompanyName(record.companyId),
+                  record.group,
+                  formatQuantity(totals.ftQuantity),
+                  formatMoney(totals.ftCost),
+                  formatQuantity(totals.hhQuantity),
+                  formatMoney(totals.hhCost),
+                ]),
+              ),
+            ]
+          : activeDashboard === "Inventory Report"
+            ? [
+                ["Inventory", "Description", "VN", "Plate", "Value"],
+                ...inventoryItems.map((item) => [
+                  `#${item.id}`,
+                  item.description,
+                  item.vn,
+                  item.plate,
+                  formatMoney(toNumber(item.value)),
+                ]),
+              ]
+            : activeDashboard === "Customers Report" ||
+                activeDashboard === "TOP Customers"
+              ? [
+                  ["Customer", "Phone", "City", "State"],
+                  ...customers.map((customer) => [
+                    customer.name,
+                    customer.phone,
+                    customer.city,
+                    customer.state,
+                  ]),
+                ]
+              : activeDashboard === "Companies Report" ||
+                  activeDashboard === "TOP Companies"
+                ? [
+                    ["Company", "Street", "Number", "City", "State"],
+                    ...companies.map((company) => [
+                      company.name,
+                      company.street,
+                      company.number,
+                      company.city,
+                      company.state,
+                    ]),
+                  ]
+                : activeDashboard === "Employees Report"
+                  ? [
+                      ["Employee", "Group", "Phone", "SSN", "ITN"],
+                      ...employees.map((employee) => [
+                        employee.name,
+                        getEmployeeGroupName(employee.group_id),
+                        employee.phone,
+                        employee.ssn ?? "",
+                        employee.itn ?? "",
+                      ]),
+                    ]
+                  : activeDashboard === "Expense Totals"
+                    ? [
+                        ["Expense Type", "Entries", "Total"],
+                        ...expenseTotalsByType.map((item) => [
+                          item.name,
+                          String(item.count),
+                          formatMoney(item.total),
+                        ]),
+                      ]
+                    : [
+                        ["Production", "Date", "Company", "Group", "Total", "Net"],
+                        ...dashboardProductionRecords.map((record) => {
+                          const totals = calculateProduction(record);
+
+                          return [
+                            `#${record.number}`,
+                            formatDate(record.date),
+                            getCompanyName(record.companyId),
+                            record.group,
+                            formatMoney(totals.totalValue),
+                            formatMoney(totals.netValue),
+                          ];
+                        }),
+                      ]),
+      ];
+
       return (
         <RegistryPanel
           description="Choose a dashboard type and review key indicators."
@@ -1376,6 +1632,14 @@ export default function Home() {
               type="button"
             >
               Export PDF
+            </button>
+
+            <button
+              className="rounded-xl bg-slate-950 px-4 py-2 text-left text-sm font-bold text-white transition hover:bg-slate-800"
+              onClick={() => exportDashboardToExcel(activeDashboard, excelRows)}
+              type="button"
+            >
+              Export Excel
             </button>
           </div>
 
@@ -2536,15 +2800,16 @@ export default function Home() {
               action={
                 <button
                   aria-label="New employee group"
-                  className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-2xl font-bold leading-none text-white transition hover:bg-slate-800"
+                  className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-bold text-white transition hover:bg-slate-800"
                   onClick={() => {
                     setEmployeeGroupForm(emptyEmployeeGroup);
                     setEditingEmployeeGroupId(null);
+                    setEmployeeGroupError("");
                     setIsEmployeeGroupModalOpen(true);
                   }}
                   type="button"
                 >
-                  +
+                  Add group
                 </button>
               }
               description="Register groups, then open a group to add employees."
@@ -2624,7 +2889,15 @@ export default function Home() {
                     }
                     value={employeeGroupForm.name}
                   />
-                  <FormActions isEditing={Boolean(editingEmployeeGroupId)} />
+                  {employeeGroupError ? (
+                    <p className="text-sm font-semibold text-rose-700">
+                      {employeeGroupError}
+                    </p>
+                  ) : null}
+                  <FormActions
+                    isEditing={Boolean(editingEmployeeGroupId)}
+                    submitLabel="Add group"
+                  />
                 </form>
               </Modal>
             ) : null}
@@ -2884,6 +3157,35 @@ export default function Home() {
       );
     }
 
+    if (activeSection === "Settings") {
+      return (
+        <RegistryPanel
+          description="Upload the company logo used in the header and exported Excel reports."
+          title="Settings"
+        >
+          <form className="grid max-w-xl gap-4" onSubmit={saveSettings}>
+            <PhotoField
+              label="Company logo"
+              multiple={false}
+              onChange={(photos) => setLogoForm(photos[0] ?? "")}
+              value={logoForm ? [logoForm] : []}
+            />
+            {settingsError ? (
+              <p className="text-sm font-semibold text-rose-700">
+                {settingsError}
+              </p>
+            ) : null}
+            <button
+              className="h-11 rounded-xl bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800"
+              type="submit"
+            >
+              Save settings
+            </button>
+          </form>
+        </RegistryPanel>
+      );
+    }
+
     if (activeSection !== "Home") {
       return (
         <RegistryPanel
@@ -2958,7 +3260,7 @@ export default function Home() {
                   <path d="M4 17h16" />
                 </svg>
               </button>
-              <span className="h-5 w-5 rounded-full bg-slate-950" />
+              <BrandMark logo={appLogo} />
               <span className="text-xl font-bold tracking-tight sm:text-2xl">
                 Sys Underground
               </span>
@@ -3047,7 +3349,7 @@ export default function Home() {
     <main className="flex min-h-screen items-center justify-center bg-slate-50 px-5 py-10 text-slate-950">
       <section className="w-full max-w-md rounded-[1.75rem] border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
         <div className="mb-10 flex items-center gap-4">
-          <span className="h-5 w-5 rounded-full bg-slate-950" />
+          <BrandMark logo={appLogo} size="lg" />
           <span className="text-3xl font-bold tracking-tight">
             Sys Underground
           </span>
@@ -3123,6 +3425,33 @@ export default function Home() {
       </section>
     </main>
   );
+}
+
+function BrandMark({
+  logo,
+  size = "md",
+}: {
+  logo: string;
+  size?: "lg" | "md";
+}) {
+  if (logo) {
+    return (
+      <Image
+        alt="Company logo"
+        className={
+          size === "lg"
+            ? "h-12 w-12 rounded-xl object-contain"
+            : "h-10 w-10 rounded-xl object-contain"
+        }
+        height={size === "lg" ? 48 : 40}
+        src={logo}
+        unoptimized
+        width={size === "lg" ? 48 : 40}
+      />
+    );
+  }
+
+  return <span className="h-5 w-5 rounded-full bg-slate-950" />;
 }
 
 function RegistryPanel({
@@ -3476,14 +3805,20 @@ function FilterField({
   );
 }
 
-function FormActions({ isEditing }: { isEditing: boolean }) {
+function FormActions({
+  isEditing,
+  submitLabel = "Add Record",
+}: {
+  isEditing: boolean;
+  submitLabel?: string;
+}) {
   return (
     <div className="flex items-end">
       <button
         className="h-11 w-full rounded-xl bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800"
         type="submit"
       >
-        {isEditing ? "Save Changes" : "Add Record"}
+        {isEditing ? "Save Changes" : submitLabel}
       </button>
     </div>
   );
@@ -3499,7 +3834,7 @@ function Modal({
   title: string;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 px-5 py-8">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 px-5 py-8">
       <section className="max-h-full w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 text-slate-950 shadow-2xl">
         <div className="mb-6 flex items-center justify-between gap-4">
           <h2 className="text-2xl font-bold tracking-tight">{title}</h2>
