@@ -240,6 +240,21 @@ function toDatePickerValue(value: string) {
   return `${year}-${month}-${day}`;
 }
 
+function getCurrentMonthDateRange() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const lastDay = String(new Date(year, now.getMonth() + 1, 0).getDate()).padStart(
+    2,
+    "0",
+  );
+
+  return {
+    from: `${month}/01/${year}`,
+    to: `${month}/${lastDay}/${year}`,
+  };
+}
+
 export default function Home() {
   const [isLoggedIn, setIsLoggedIn] = useState(
     () =>
@@ -311,12 +326,20 @@ export default function Home() {
   const [userFilter, setUserFilter] = useState("");
   const [inventoryFilter, setInventoryFilter] = useState("");
   const [expenseTypeFilter, setExpenseTypeFilter] = useState("");
-  const [productionDateFrom, setProductionDateFrom] = useState("");
-  const [productionDateTo, setProductionDateTo] = useState("");
+  const [productionDateFrom, setProductionDateFrom] = useState(
+    () => getCurrentMonthDateRange().from,
+  );
+  const [productionDateTo, setProductionDateTo] = useState(
+    () => getCurrentMonthDateRange().to,
+  );
   const [productionCompanyFilter, setProductionCompanyFilter] = useState("");
   const [productionGroupFilter, setProductionGroupFilter] = useState("");
-  const [dashboardDateFrom, setDashboardDateFrom] = useState("");
-  const [dashboardDateTo, setDashboardDateTo] = useState("");
+  const [dashboardDateFrom, setDashboardDateFrom] = useState(
+    () => getCurrentMonthDateRange().from,
+  );
+  const [dashboardDateTo, setDashboardDateTo] = useState(
+    () => getCurrentMonthDateRange().to,
+  );
   const [dashboardCompanyFilter, setDashboardCompanyFilter] = useState("");
   const [dashboardGroupFilter, setDashboardGroupFilter] = useState("");
   const [dashboardExpenseTypeFilter, setDashboardExpenseTypeFilter] =
@@ -428,6 +451,20 @@ export default function Home() {
   }
 
   function handleSectionChange(section: SectionName) {
+    if (section !== activeSection) {
+      const currentMonth = getCurrentMonthDateRange();
+
+      if (section === "Production") {
+        setProductionDateFrom(currentMonth.from);
+        setProductionDateTo(currentMonth.to);
+      }
+
+      if (section === "Dashboards") {
+        setDashboardDateFrom(currentMonth.from);
+        setDashboardDateTo(currentMonth.to);
+      }
+    }
+
     setActiveSection(section);
     setIsMenuOpen(false);
     setIsDashboardMenuOpen(false);
@@ -1569,9 +1606,10 @@ export default function Home() {
             <button
               className="text-left text-sm font-bold text-slate-600 transition hover:text-slate-950"
               onClick={() => {
+                const currentMonth = getCurrentMonthDateRange();
                 setActiveDashboard("Summary");
-                setDashboardDateFrom("");
-                setDashboardDateTo("");
+                setDashboardDateFrom(currentMonth.from);
+                setDashboardDateTo(currentMonth.to);
                 setDashboardCompanyFilter("");
                 setDashboardGroupFilter("");
                 setDashboardExpenseTypeFilter("");
