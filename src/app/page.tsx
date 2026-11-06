@@ -1047,13 +1047,6 @@ export default function Home() {
   }
 
   async function loadAllocation() {
-    if (!hasFilterValue([allocationQuery, allocationGroupId])) {
-      setAllocationItems([]);
-      setAllocationLoaded(false);
-      setListError("Choose a group or type a search to load equipment.");
-      return;
-    }
-
     const params = new URLSearchParams({ photos: "0" });
 
     if (allocationQuery.trim()) {
@@ -1062,6 +1055,8 @@ export default function Home() {
 
     if (allocationGroupId) {
       params.set("groupId", allocationGroupId);
+    } else {
+      params.set("all", "1");
     }
 
     try {
