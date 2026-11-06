@@ -1022,13 +1022,6 @@ export default function Home() {
   }
 
   async function loadFilteredInventory() {
-    if (!hasFilterValue([inventoryFilter, inventoryGroupFilter])) {
-      setInventoryItems([]);
-      setInventoryLoaded(false);
-      setListError("Set a filter before loading records.");
-      return;
-    }
-
     const params = new URLSearchParams();
 
     if (inventoryFilter.trim()) {
@@ -1037,6 +1030,8 @@ export default function Home() {
 
     if (inventoryGroupFilter) {
       params.set("groupId", inventoryGroupFilter);
+    } else {
+      params.set("all", "1");
     }
 
     try {
