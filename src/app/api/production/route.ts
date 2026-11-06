@@ -127,11 +127,39 @@ function mapProductionPayload(body: ProductionBody) {
   };
 }
 
-export async function GET() {
-  const { data, error } = await supabaseAdmin
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const from = searchParams.get("from");
+  const to = searchParams.get("to");
+  const companyId = searchParams.get("companyId");
+  const group = searchParams.get("group")?.replace(/[%_,]/g, "").trim() ?? "";
+
+  if (!from && !to && !companyId && !group) {
+    return apiSuccess([]);
+  }
+
+  let recordsQuery = supabaseAdmin
     .from("production_records")
     .select("*, production_expenses(expense_type_id, value)")
     .order("number", { ascending: true });
+
+  if (from) {
+    recordsQuery = recordsQuery.gte("production_date", toIsoDate(from));
+  }
+
+  if (to) {
+    recordsQuery = recordsQuery.lte("production_date", toIsoDate(to));
+  }
+
+  if (companyId) {
+    recordsQuery = recordsQuery.eq("company_id", Number(companyId));
+  }
+
+  if (group) {
+    recordsQuery = recordsQuery.ilike("group_name", `%${group}%`);
+  }
+
+  const { data, error } = await recordsQuery;
 
   if (error) {
     return apiError(error.message, 500);

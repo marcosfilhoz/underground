@@ -7,6 +7,7 @@ type SectionName =
   | "Home"
   | "Production"
   | "Inventory"
+  | "Allocation"
   | "Customers"
   | "Companies"
   | "Employees"
@@ -62,6 +63,7 @@ type InventoryItem = {
   value: string;
   plate: string;
   photos: string[];
+  group_id?: number | null;
 };
 
 type ExpenseType = {
@@ -132,6 +134,7 @@ const emptyInventoryItem = {
   vn: "",
   value: "",
   plate: "",
+  group_id: "",
 };
 
 const emptyExpenseType = {
@@ -256,11 +259,7 @@ function getCurrentMonthDateRange() {
 }
 
 export default function Home() {
-  const [isLoggedIn, setIsLoggedIn] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      Boolean(window.localStorage.getItem(sessionStorageKey)),
-  );
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionName>("Home");
   const [loginForm, setLoginForm] = useState({ password: "", username: "" });
@@ -325,6 +324,24 @@ export default function Home() {
   >(null);
   const [userFilter, setUserFilter] = useState("");
   const [inventoryFilter, setInventoryFilter] = useState("");
+  const [inventoryGroupFilter, setInventoryGroupFilter] = useState("");
+  const [inventoryLoaded, setInventoryLoaded] = useState(false);
+  const [allocationQuery, setAllocationQuery] = useState("");
+  const [allocationGroupId, setAllocationGroupId] = useState("");
+  const [allocationItems, setAllocationItems] = useState<InventoryItem[]>([]);
+  const [allocationLoaded, setAllocationLoaded] = useState(false);
+  const [allocationStatus, setAllocationStatus] = useState<
+    Record<number, string>
+  >({});
+  const [productionLoaded, setProductionLoaded] = useState(false);
+  const [dashboardRecords, setDashboardRecords] = useState<ProductionRecord[]>(
+    [],
+  );
+  const [dashboardInventory, setDashboardInventory] = useState<InventoryItem[]>(
+    [],
+  );
+  const [dashboardLoaded, setDashboardLoaded] = useState(false);
+  const [listError, setListError] = useState("");
   const [expenseTypeFilter, setExpenseTypeFilter] = useState("");
   const [productionDateFrom, setProductionDateFrom] = useState(
     () => getCurrentMonthDateRange().from,
@@ -358,6 +375,7 @@ export default function Home() {
     { label: "Dashboards", description: "System overview and analytics", icon: "DA" },
     { label: "Production", description: "Manage production orders", icon: "PR" },
     { label: "Inventory", description: "Control stock and supplies", icon: "IN" },
+    { label: "Allocation", description: "Assign equipment to a group", icon: "AL" },
     { label: "Customers", description: "Manage customer records", icon: "CU" },
     { label: "Companies", description: "Company records and units", icon: "CO" },
     { label: "Employees", description: "Team records and access", icon: "EM" },
@@ -386,6 +404,12 @@ export default function Home() {
   ];
 
   useEffect(() => {
+    if (window.localStorage.getItem(sessionStorageKey)) {
+      setIsLoggedIn(true);
+    }
+  }, []);
+
+  useEffect(() => {
     apiRequest<{ logo?: string | null }>("/api/settings")
       .then((data) => {
         const logo = data.logo ?? "";
@@ -404,31 +428,22 @@ export default function Home() {
       const [
         companyData,
         customerData,
-        employeeData,
         employeeGroupData,
         userData,
-        inventoryData,
         expenseTypeData,
-        productionData,
       ] = await Promise.all([
         apiRequest<Company[]>("/api/companies"),
         apiRequest<Customer[]>("/api/customers"),
-        apiRequest<Employee[]>("/api/employees"),
         apiRequest<EmployeeGroup[]>("/api/employee-groups").catch(() => []),
         apiRequest<UserRecord[]>("/api/users"),
-        apiRequest<InventoryItem[]>("/api/inventory"),
         apiRequest<ExpenseType[]>("/api/expense-types"),
-        apiRequest<ProductionRecord[]>("/api/production"),
       ]);
 
       setCompanies(companyData);
       setCustomers(customerData);
-      setEmployees(employeeData);
       setEmployeeGroups(employeeGroupData);
       setUsers(userData);
-      setInventoryItems(inventoryData);
       setExpenseTypes(expenseTypeData);
-      setProductionRecords(productionData);
     }
 
     loadData().catch((error) => setLoginError(error.message));
@@ -468,6 +483,7 @@ export default function Home() {
     setActiveSection(section);
     setIsMenuOpen(false);
     setIsDashboardMenuOpen(false);
+    setListError("");
 
     if (section !== "Dashboards") {
       setAreDashboardValuesVisible(false);
@@ -770,6 +786,7 @@ export default function Home() {
           },
         );
         setEmployeeGroups((current) => [...current, savedGroup]);
+        setEmployees([]);
         setSelectedEmployeeGroupId(savedGroup.id);
       }
 
@@ -795,8 +812,26 @@ export default function Home() {
     setIsEmployeeGroupModalOpen(true);
   }
 
+  async function openEmployeeGroup(id: number | "unassigned") {
+    setEmployeeFilter("");
+    setSelectedEmployeeGroupId(id);
+    setListError("");
+
+    try {
+      const employeeData = await apiRequest<Employee[]>(
+        `/api/employees?groupId=${id}`,
+      );
+      setEmployees(employeeData);
+    } catch (error) {
+      setEmployees([]);
+      setListError((error as Error).message);
+    }
+  }
+
   async function deleteEmployeeGroup(id: number) {
-    if (employees.some((employee) => employee.group_id === id)) {
+    const members = await apiRequest<Employee[]>(`/api/employees?groupId=${id}`);
+
+    if (members.length > 0) {
       window.alert("Move or delete employees in this group first.");
       return;
     }
@@ -866,10 +901,246 @@ export default function Home() {
     }
   }
 
-  function getNextInventoryId() {
-    return inventoryItems.length === 0
-      ? 1
-      : Math.max(...inventoryItems.map((item) => item.id)) + 1;
+  function groupOptions() {
+    return [
+      { label: "Unassigned", value: "unassigned" },
+      ...employeeGroups.map((group) => ({
+        label: group.name,
+        value: String(group.id),
+      })),
+    ];
+  }
+
+  function groupName(groupId?: number | null) {
+    if (!groupId) {
+      return "Unassigned";
+    }
+
+    return (
+      employeeGroups.find((group) => group.id === groupId)?.name ?? "Unassigned"
+    );
+  }
+
+  function hasFilterValue(values: string[]) {
+    return values.some((value) => value.trim().length > 0);
+  }
+
+  async function loadFilteredProduction() {
+    if (
+      !hasFilterValue([
+        productionDateFrom,
+        productionDateTo,
+        productionCompanyFilter,
+        productionGroupFilter,
+      ])
+    ) {
+      setProductionRecords([]);
+      setProductionLoaded(false);
+      setListError("Set a filter before loading records.");
+      return;
+    }
+
+    const params = new URLSearchParams();
+
+    if (productionDateFrom) {
+      params.set("from", productionDateFrom);
+    }
+
+    if (productionDateTo) {
+      params.set("to", productionDateTo);
+    }
+
+    if (productionCompanyFilter) {
+      params.set("companyId", productionCompanyFilter);
+    }
+
+    if (productionGroupFilter.trim()) {
+      params.set("group", productionGroupFilter.trim());
+    }
+
+    try {
+      const data = await apiRequest<ProductionRecord[]>(
+        `/api/production?${params.toString()}`,
+      );
+      setProductionRecords(data);
+      setProductionLoaded(true);
+      setListError("");
+    } catch (error) {
+      setListError((error as Error).message);
+    }
+  }
+
+  async function loadDashboard() {
+    if (
+      !hasFilterValue([
+        dashboardDateFrom,
+        dashboardDateTo,
+        dashboardCompanyFilter,
+        dashboardGroupFilter,
+        dashboardExpenseTypeFilter,
+      ])
+    ) {
+      setDashboardRecords([]);
+      setDashboardInventory([]);
+      setDashboardLoaded(false);
+      setListError("Set a filter before loading records.");
+      return;
+    }
+
+    const params = new URLSearchParams();
+
+    if (dashboardDateFrom) {
+      params.set("from", dashboardDateFrom);
+    }
+
+    if (dashboardDateTo) {
+      params.set("to", dashboardDateTo);
+    }
+
+    if (dashboardCompanyFilter) {
+      params.set("companyId", dashboardCompanyFilter);
+    }
+
+    if (dashboardGroupFilter.trim()) {
+      params.set("group", dashboardGroupFilter.trim());
+    }
+
+    try {
+      const [productionData, inventoryData] = await Promise.all([
+        apiRequest<ProductionRecord[]>(`/api/production?${params.toString()}`),
+        activeDashboard === "Inventory Report" || activeDashboard === "Summary"
+          ? apiRequest<InventoryItem[]>("/api/inventory?photos=0&all=1")
+          : Promise.resolve([]),
+      ]);
+      setDashboardRecords(productionData);
+      setDashboardInventory(inventoryData);
+      setDashboardLoaded(true);
+      setListError("");
+    } catch (error) {
+      setListError((error as Error).message);
+    }
+  }
+
+  async function loadFilteredInventory() {
+    if (!hasFilterValue([inventoryFilter, inventoryGroupFilter])) {
+      setInventoryItems([]);
+      setInventoryLoaded(false);
+      setListError("Set a filter before loading records.");
+      return;
+    }
+
+    const params = new URLSearchParams();
+
+    if (inventoryFilter.trim()) {
+      params.set("q", inventoryFilter.trim());
+    }
+
+    if (inventoryGroupFilter) {
+      params.set("groupId", inventoryGroupFilter);
+    }
+
+    try {
+      const data = await apiRequest<InventoryItem[]>(
+        `/api/inventory?${params.toString()}`,
+      );
+      setInventoryItems(data);
+      setInventoryLoaded(true);
+      setListError("");
+    } catch (error) {
+      setListError((error as Error).message);
+    }
+  }
+
+  async function loadAllocation() {
+    if (!hasFilterValue([allocationQuery, allocationGroupId])) {
+      setAllocationItems([]);
+      setAllocationLoaded(false);
+      setListError("Choose a group or type a search to load equipment.");
+      return;
+    }
+
+    const params = new URLSearchParams({ photos: "0" });
+
+    if (allocationQuery.trim()) {
+      params.set("q", allocationQuery.trim());
+    }
+
+    if (allocationGroupId) {
+      params.set("groupId", allocationGroupId);
+    }
+
+    try {
+      const data = await apiRequest<InventoryItem[]>(
+        `/api/inventory?${params.toString()}`,
+      );
+      setAllocationItems(data);
+      setAllocationLoaded(true);
+      setAllocationStatus({});
+      setListError("");
+    } catch (error) {
+      setListError((error as Error).message);
+    }
+  }
+
+  async function assignEquipmentGroup(item: InventoryItem, groupId: string) {
+    const nextGroupId =
+      groupId === "unassigned" || groupId === "" ? null : Number(groupId);
+
+    setAllocationStatus((current) => ({ ...current, [item.id]: "Saving" }));
+    setAllocationItems((current) =>
+      current.map((currentItem) =>
+        currentItem.id === item.id
+          ? { ...currentItem, group_id: nextGroupId }
+          : currentItem,
+      ),
+    );
+
+    try {
+      const savedItem = await apiRequest<InventoryItem>("/api/inventory", {
+        body: JSON.stringify({
+          assign_group: true,
+          group_id: nextGroupId,
+          id: item.id,
+        }),
+        method: "PUT",
+      });
+      setAllocationItems((current) =>
+        current.flatMap((currentItem) => {
+          if (currentItem.id !== item.id) {
+            return [currentItem];
+          }
+
+          const matchesGroup =
+            !allocationGroupId ||
+            (allocationGroupId === "unassigned"
+              ? !savedItem.group_id
+              : savedItem.group_id === Number(allocationGroupId));
+
+          return matchesGroup
+            ? [{ ...currentItem, group_id: savedItem.group_id }]
+            : [];
+        }),
+      );
+      setAllocationStatus((current) => ({ ...current, [item.id]: "Saved" }));
+      setListError("");
+    } catch (error) {
+      setAllocationItems((current) =>
+        current.map((currentItem) =>
+          currentItem.id === item.id ? item : currentItem,
+        ),
+      );
+      setAllocationStatus((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+      const message = (error as Error).message;
+      setListError(
+        /group_id|schema cache|does not exist|column/i.test(message)
+          ? "Inventory group column is missing in Supabase. Run: alter table inventory_items add column if not exists group_id bigint references employee_groups(id);"
+          : message,
+      );
+    }
   }
 
   async function saveInventoryItem(event: FormEvent<HTMLFormElement>) {
@@ -901,6 +1172,7 @@ export default function Home() {
   function editInventoryItem(item: InventoryItem) {
     setInventoryForm({
       description: item.description,
+      group_id: item.group_id ? String(item.group_id) : "",
       plate: item.plate,
       photos: item.photos,
       value: item.value,
@@ -919,12 +1191,6 @@ export default function Home() {
       setInventoryForm(emptyInventoryItem);
       setIsInventoryModalOpen(false);
     }
-  }
-
-  function getNextProductionNumber() {
-    return productionRecords.length === 0
-      ? 1
-      : Math.max(...productionRecords.map((record) => record.number)) + 1;
   }
 
   async function saveExpenseType(event: FormEvent<HTMLFormElement>) {
@@ -1186,19 +1452,8 @@ export default function Home() {
 
   function renderActiveSection() {
     if (activeSection === "Dashboards") {
-      const dashboardProductionRecords = productionRecords.filter((record) =>
-        (!dashboardDateFrom ||
-          (Boolean(parseUsDate(record.date)) &&
-            Boolean(parseUsDate(dashboardDateFrom)) &&
-            parseUsDate(record.date)! >= parseUsDate(dashboardDateFrom)!)) &&
-        (!dashboardDateTo ||
-          (Boolean(parseUsDate(record.date)) &&
-            Boolean(parseUsDate(dashboardDateTo)) &&
-            parseUsDate(record.date)! <= parseUsDate(dashboardDateTo)!)) &&
-        (!dashboardCompanyFilter ||
-          record.companyId === dashboardCompanyFilter) &&
-        record.group.toLowerCase().includes(dashboardGroupFilter.toLowerCase()),
-      );
+      const dashboardProductionRecords = dashboardLoaded ? dashboardRecords : [];
+      const inventoryItems = dashboardLoaded ? dashboardInventory : [];
 
       const productionTotals = dashboardProductionRecords.reduce(
         (totals, record) => {
@@ -1483,12 +1738,13 @@ export default function Home() {
             ]
           : activeDashboard === "Inventory Report"
             ? [
-                ["Inventory", "Description", "VN", "Plate", "Value"],
+                ["Inventory", "Description", "VN", "Plate", "Group", "Value"],
                 ...inventoryItems.map((item) => [
                   `#${item.id}`,
                   item.description,
                   item.vn,
                   item.plate,
+                  groupName(item.group_id),
                   formatMoney(toNumber(item.value)),
                 ]),
               ]
@@ -1593,6 +1849,10 @@ export default function Home() {
                       onClick={() => {
                         setActiveDashboard(option);
                         setIsDashboardMenuOpen(false);
+                        setDashboardRecords([]);
+                        setDashboardInventory([]);
+                        setDashboardLoaded(false);
+                        setListError("");
                       }}
                       type="button"
                     >
@@ -1613,10 +1873,25 @@ export default function Home() {
                 setDashboardCompanyFilter("");
                 setDashboardGroupFilter("");
                 setDashboardExpenseTypeFilter("");
+                setDashboardRecords([]);
+                setDashboardInventory([]);
+                setDashboardLoaded(false);
+                setListError("");
               }}
               type="button"
             >
               Clear filters
+            </button>
+            <button
+              className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-bold text-white transition hover:bg-slate-800"
+              onClick={() => {
+                loadDashboard().catch((error) =>
+                  setListError((error as Error).message),
+                );
+              }}
+              type="button"
+            >
+              Filter
             </button>
 
             <button
@@ -1726,6 +2001,14 @@ export default function Home() {
           </div>
 
           <div id="dashboard-report">
+            {!dashboardLoaded ? (
+              <EmptyState
+                message={
+                  listError || "Set a filter and choose Filter to load this report."
+                }
+              />
+            ) : (
+              <>
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {dashboardCards.map((card) => (
                 <MetricCard
@@ -1751,7 +2034,8 @@ export default function Home() {
                       title={`Inventory #${item.id}`}
                       value={dashboardMoney(toNumber(item.value))}
                     >
-                      {item.description} | VN: {item.vn} | Plate: {item.plate}
+                      {item.description} | VN: {item.vn} | Plate: {item.plate} | Group:{" "}
+                      {groupName(item.group_id)}
                     </DashboardDetailRow>
                   ))
                 )
@@ -2005,27 +2289,15 @@ export default function Home() {
               ) : null}
               </div>
             </div>
+              </>
+            )}
           </div>
         </RegistryPanel>
       );
     }
 
     if (activeSection === "Production") {
-      const filteredProductionRecords = productionRecords.filter((record) =>
-        (!productionDateFrom ||
-          Boolean(parseUsDate(record.date)) &&
-            Boolean(parseUsDate(productionDateFrom)) &&
-            parseUsDate(record.date)! >= parseUsDate(productionDateFrom)!) &&
-        (!productionDateTo ||
-          Boolean(parseUsDate(record.date)) &&
-            Boolean(parseUsDate(productionDateTo)) &&
-            parseUsDate(record.date)! <= parseUsDate(productionDateTo)!) &&
-        (!productionCompanyFilter ||
-          record.companyId === productionCompanyFilter) &&
-        record.group
-          .toLowerCase()
-          .includes(productionGroupFilter.toLowerCase()),
-      );
+      const filteredProductionRecords = productionLoaded ? productionRecords : [];
 
       return (
         <>
@@ -2079,10 +2351,16 @@ export default function Home() {
                 onChange={setProductionGroupFilter}
                 value={productionGroupFilter}
               />
+              <FilterButton onClick={loadFilteredProduction} />
             </div>
+            {listError ? (
+              <p className="mt-4 text-sm font-semibold text-rose-700">{listError}</p>
+            ) : null}
 
             <div className="mt-6 grid gap-3">
-              {filteredProductionRecords.length === 0 ? (
+              {!productionLoaded ? (
+                <EmptyState message="Set a filter and choose Filter to load records." />
+              ) : filteredProductionRecords.length === 0 ? (
                 <EmptyState message="No production records found." />
               ) : (
                 filteredProductionRecords.map((record) => {
@@ -2115,9 +2393,7 @@ export default function Home() {
             <Modal
               onClose={() => setIsProductionModalOpen(false)}
               title={
-                editingProductionId
-                  ? "Edit Production"
-                  : `New Production #${getNextProductionNumber()}`
+                editingProductionId ? "Edit Production" : "New Production"
               }
             >
               <form className="grid gap-4 md:grid-cols-2" onSubmit={saveProduction}>
@@ -2130,7 +2406,7 @@ export default function Home() {
                             (record) => record.id === editingProductionId,
                           )?.number ?? "",
                         )
-                      : String(getNextProductionNumber())
+                      : "Auto"
                   }
                 />
                 <TextField
@@ -2395,14 +2671,6 @@ export default function Home() {
     }
 
     if (activeSection === "Inventory") {
-      const normalizedInventoryFilter = inventoryFilter.toLowerCase();
-      const filteredInventoryItems = inventoryItems.filter((item) =>
-        [String(item.id), item.description, item.vn, item.value, item.plate]
-          .join(" ")
-          .toLowerCase()
-          .includes(normalizedInventoryFilter),
-      );
-
       return (
         <>
           <RegistryPanel
@@ -2420,20 +2688,36 @@ export default function Home() {
                 +
               </button>
             }
-            description="Search and manage inventory records."
+            description="Set a search or group, then load matching equipment."
             title="Inventory"
           >
-            <FilterField
-              label="Search inventory"
-              onChange={setInventoryFilter}
-              value={inventoryFilter}
-            />
+            <div className="grid gap-4 md:grid-cols-[1fr_1fr_auto]">
+              <FilterField
+                label="Search inventory"
+                onChange={setInventoryFilter}
+                value={inventoryFilter}
+              />
+              <SelectField
+                label="Group"
+                onChange={setInventoryGroupFilter}
+                options={groupOptions()}
+                placeholder="All groups"
+                required={false}
+                value={inventoryGroupFilter}
+              />
+              <FilterButton onClick={loadFilteredInventory} />
+            </div>
+            {listError ? (
+              <p className="mt-4 text-sm font-semibold text-rose-700">{listError}</p>
+            ) : null}
 
             <div className="mt-6 grid gap-3">
-              {filteredInventoryItems.length === 0 ? (
+              {!inventoryLoaded ? (
+                <EmptyState message="Set a filter and choose Filter to load records." />
+              ) : inventoryItems.length === 0 ? (
                 <EmptyState message="No inventory items found." />
               ) : (
-                filteredInventoryItems.map((item) => (
+                inventoryItems.map((item) => (
                   <RecordCard
                     key={item.id}
                     onDelete={() => deleteInventoryItem(item.id)}
@@ -2446,7 +2730,8 @@ export default function Home() {
                     <br />
                     VN: {item.vn} | Plate: {item.plate}
                     <br />
-                    Value: {formatMoney(toNumber(item.value))}
+                    Group: {groupName(item.group_id)} | Value:{" "}
+                    {formatMoney(toNumber(item.value))}
                   </RecordCard>
                 ))
               )}
@@ -2456,20 +2741,28 @@ export default function Home() {
           {isInventoryModalOpen ? (
             <Modal
               onClose={() => setIsInventoryModalOpen(false)}
-              title={
-                editingInventoryId
-                  ? "Edit Inventory"
-                  : `New Inventory #${getNextInventoryId()}`
-              }
+              title={editingInventoryId ? "Edit Inventory" : "New Inventory"}
             >
               <form className="grid gap-4 md:grid-cols-2" onSubmit={saveInventoryItem}>
                 <ReadOnlyField
                   label="ID"
-                  value={
-                    editingInventoryId
-                      ? String(editingInventoryId)
-                      : String(getNextInventoryId())
+                  value={editingInventoryId ? String(editingInventoryId) : "Auto"}
+                />
+                <SelectField
+                  label="Group"
+                  onChange={(value) =>
+                    setInventoryForm((current) => ({
+                      ...current,
+                      group_id: value === "unassigned" ? "" : value,
+                    }))
                   }
+                  options={employeeGroups.map((group) => ({
+                    label: group.name,
+                    value: String(group.id),
+                  }))}
+                  placeholder="Unassigned"
+                  required={false}
+                  value={inventoryForm.group_id}
                 />
                 <TextField
                   label="Description"
@@ -2522,6 +2815,93 @@ export default function Home() {
       );
     }
 
+    if (activeSection === "Allocation") {
+      return (
+        <RegistryPanel
+          description="Filter equipment, then point each item to the group that has it."
+          title="Allocation"
+        >
+          <div className="grid gap-4 md:grid-cols-[1fr_1fr_auto]">
+            <SelectField
+              label="Group"
+              onChange={setAllocationGroupId}
+              options={groupOptions()}
+              placeholder="All groups"
+              required={false}
+              value={allocationGroupId}
+            />
+            <FilterField
+              label="Search equipment"
+              onChange={setAllocationQuery}
+              placeholder="Description, VN, or plate"
+              value={allocationQuery}
+            />
+            <FilterButton onClick={loadAllocation} />
+          </div>
+          {listError ? (
+            <p className="mt-4 text-sm font-semibold text-rose-700">{listError}</p>
+          ) : null}
+
+          <div className="mt-6 grid gap-3">
+            {listError ? null : !allocationLoaded ? (
+              <EmptyState message="Choose a group or type a search, then choose Filter." />
+            ) : allocationItems.length === 0 ? (
+              <EmptyState message="No equipment found for this filter." />
+            ) : (
+              <>
+              <p className="text-sm font-semibold text-slate-500">
+                {allocationItems.length} equipment
+                {allocationGroupId
+                  ? ` in ${allocationGroupId === "unassigned" ? "Unassigned" : groupName(Number(allocationGroupId))}`
+                  : ""}
+              </p>
+              {allocationItems.map((item) => (
+                <article
+                  className="grid gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-[1fr_16rem] md:items-center"
+                  key={item.id}
+                >
+                  <div>
+                    <h3 className="font-bold text-slate-950">
+                      {item.description || `Equipment #${item.id}`}
+                    </h3>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">
+                      VN: {item.vn || "—"} | Plate: {item.plate || "—"}
+                      <br />
+                      Current group: {groupName(item.group_id)}
+                    </p>
+                  </div>
+                  <div>
+                    <SelectField
+                      id={`assigned-group-${item.id}`}
+                      label="Assigned group"
+                      onChange={(value) => {
+                        assignEquipmentGroup(item, value || "unassigned").catch(
+                          (error) => setListError((error as Error).message),
+                        );
+                      }}
+                      options={employeeGroups.map((group) => ({
+                        label: group.name,
+                        value: String(group.id),
+                      }))}
+                      placeholder="Unassigned"
+                      required={false}
+                      value={item.group_id ? String(item.group_id) : ""}
+                    />
+                    {allocationStatus[item.id] ? (
+                      <p className="mt-2 text-xs font-semibold text-slate-500">
+                        {allocationStatus[item.id]}
+                      </p>
+                    ) : null}
+                  </div>
+                </article>
+              ))}
+              </>
+            )}
+          </div>
+        </RegistryPanel>
+      );
+    }
+
     if (activeSection === "Expense Types") {
       const normalizedExpenseTypeFilter = expenseTypeFilter.toLowerCase();
       const filteredExpenseTypes = expenseTypes.filter((expenseType) =>
@@ -2555,7 +2935,9 @@ export default function Home() {
             />
 
             <div className="mt-6 grid gap-3">
-              {filteredExpenseTypes.length === 0 ? (
+              {!expenseTypeFilter.trim() ? (
+                <EmptyState message="Type a filter to load records." />
+              ) : filteredExpenseTypes.length === 0 ? (
                 <EmptyState message="No expense types found." />
               ) : (
                 filteredExpenseTypes.map((expenseType) => (
@@ -2636,7 +3018,9 @@ export default function Home() {
             />
 
             <div className="mt-6 grid gap-3">
-              {filteredCompanies.length === 0 ? (
+              {!companyFilter.trim() ? (
+                <EmptyState message="Type a filter to load records." />
+              ) : filteredCompanies.length === 0 ? (
                 <EmptyState message="No companies found." />
               ) : (
                 filteredCompanies.map((company) => (
@@ -2740,7 +3124,9 @@ export default function Home() {
             />
 
             <div className="mt-6 grid gap-3">
-              {filteredCustomers.length === 0 ? (
+              {!customerFilter.trim() ? (
+                <EmptyState message="Type a filter to load records." />
+              ) : filteredCustomers.length === 0 ? (
                 <EmptyState message="No customers found." />
               ) : (
                 filteredCustomers.map((customer) => (
@@ -2806,9 +3192,6 @@ export default function Home() {
         selectedEmployeeGroupId === "unassigned"
           ? null
           : employeeGroups.find((group) => group.id === selectedEmployeeGroupId);
-      const unassignedEmployees = employees.filter(
-        (employee) => !employee.group_id,
-      );
       const employeesInSelectedGroup = employees.filter((employee) =>
         selectedEmployeeGroupId === "unassigned"
           ? !employee.group_id
@@ -2861,47 +3244,41 @@ export default function Home() {
 
               <div className="mt-6 grid gap-3">
                 {filteredEmployeeGroups.length === 0 &&
-                unassignedEmployees.length === 0 ? (
+                employeeGroupFilter.trim() ? (
                   <EmptyState message="No employee groups found." />
                 ) : (
                   <>
                     {filteredEmployeeGroups.map((group) => {
-                      const groupCount = employees.filter(
-                        (employee) => employee.group_id === group.id,
-                      ).length;
-
                       return (
                         <RecordCard
                           detailLabel="Open"
                           key={group.id}
                           onDelete={() => deleteEmployeeGroup(group.id)}
                           onDetail={() => {
-                            setEmployeeFilter("");
-                            setSelectedEmployeeGroupId(group.id);
+                            openEmployeeGroup(group.id).catch((error) =>
+                              setListError((error as Error).message),
+                            );
                           }}
                           onEdit={() => editEmployeeGroup(group)}
                           title={group.name}
                         >
-                          {groupCount}{" "}
-                          {groupCount === 1 ? "employee" : "employees"}
+                          Open to view the employees in this group.
                         </RecordCard>
                       );
                     })}
-                    {unassignedEmployees.length > 0 ? (
+                    {employeeGroupFilter.trim() ? null : (
                       <RecordCard
                         detailLabel="Open"
                         onDetail={() => {
-                          setEmployeeFilter("");
-                          setSelectedEmployeeGroupId("unassigned");
+                          openEmployeeGroup("unassigned").catch((error) =>
+                            setListError((error as Error).message),
+                          );
                         }}
                         title="Unassigned"
                       >
-                        {unassignedEmployees.length}{" "}
-                        {unassignedEmployees.length === 1
-                          ? "employee"
-                          : "employees"}
+                        Open to view employees without a group.
                       </RecordCard>
-                    ) : null}
+                    )}
                   </>
                 )}
               </div>
@@ -3142,7 +3519,9 @@ export default function Home() {
             />
 
             <div className="mt-6 grid gap-3">
-              {filteredUsers.length === 0 ? (
+              {!userFilter.trim() ? (
+                <EmptyState message="Type a filter to load records." />
+              ) : filteredUsers.length === 0 ? (
                 <EmptyState message="No users found." />
               ) : (
                 filteredUsers.map((user) => (
@@ -3760,6 +4139,7 @@ function readImageFile(file: File) {
 }
 
 function SelectField({
+  id,
   label,
   onChange,
   options,
@@ -3767,6 +4147,7 @@ function SelectField({
   required = true,
   value,
 }: {
+  id?: string;
   label: string;
   onChange: (value: string) => void;
   options: Array<{ label: string; value: string }>;
@@ -3774,16 +4155,16 @@ function SelectField({
   required?: boolean;
   value: string;
 }) {
-  const id = label.toLowerCase().replaceAll(" ", "-");
+  const fieldId = id ?? label.toLowerCase().replaceAll(" ", "-");
 
   return (
     <div>
-      <label className="text-sm font-semibold text-slate-700" htmlFor={id}>
+      <label className="text-sm font-semibold text-slate-700" htmlFor={fieldId}>
         {label}
       </label>
       <select
         className="mt-2 h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-950 outline-none transition focus:border-slate-950 focus:bg-white focus:ring-4 focus:ring-slate-100"
-        id={id}
+        id={fieldId}
         onChange={(event) => onChange(event.target.value)}
         required={required}
         value={value}
@@ -3795,6 +4176,20 @@ function SelectField({
           </option>
         ))}
       </select>
+    </div>
+  );
+}
+
+function FilterButton({ onClick }: { onClick: () => void }) {
+  return (
+    <div className="flex items-end">
+      <button
+        className="h-11 rounded-xl bg-slate-950 px-5 text-sm font-bold text-white transition hover:bg-slate-800"
+        onClick={onClick}
+        type="button"
+      >
+        Filter
+      </button>
     </div>
   );
 }
